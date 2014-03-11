@@ -547,6 +547,7 @@ limitations under the License.
               </goals>
               <configuration>
                 <excludes>
+		  <exclude>conf/*</exclude>
 	          <exclude>**/.idea/</exclude>
                   <exclude>**/*.iml</exclude>
                   <exclude>**/nb-configuration.xml</exclude>

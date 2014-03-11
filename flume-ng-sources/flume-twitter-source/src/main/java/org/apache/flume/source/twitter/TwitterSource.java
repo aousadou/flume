@@ -133,9 +133,9 @@ public class TwitterSource
     totalTextIndexed = 0;
     skippedDocs = 0;
     batchEndTime = System.currentTimeMillis() + maxBatchDurationMillis;
-    // twitterStream.sample();
+    twitterStream.sample();
     //
-    twitterStream.firehose(150000);
+    // twitterStream.firehose(0);
     LOGGER.info("Twitter source {} started.", getName());
     // This should happen at the end of the start method, since this will 
     // change the lifecycle status of the component to tell the Flume 
