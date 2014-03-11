@@ -18,14 +18,6 @@
  */
 package org.apache.flume.source.twitter;
 
-import java.io.ByteArrayOutputStream;
-import java.io.IOException;
-import java.text.DecimalFormat;
-import java.text.SimpleDateFormat;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-
 import org.apache.avro.Schema;
 import org.apache.avro.Schema.Field;
 import org.apache.avro.Schema.Type;
@@ -33,7 +25,6 @@ import org.apache.avro.file.DataFileWriter;
 import org.apache.avro.generic.GenericData.Record;
 import org.apache.avro.generic.GenericDatumWriter;
 import org.apache.avro.generic.GenericRecord;
-import org.apache.avro.io.DatumWriter;
 import org.apache.flume.Context;
 import org.apache.flume.Event;
 import org.apache.flume.EventDrivenSource;
@@ -44,7 +35,6 @@ import org.apache.flume.event.EventBuilder;
 import org.apache.flume.source.AbstractSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
 import twitter4j.MediaEntity;
 import twitter4j.StallWarning;
 import twitter4j.Status;
@@ -54,6 +44,14 @@ import twitter4j.TwitterStream;
 import twitter4j.TwitterStreamFactory;
 import twitter4j.User;
 import twitter4j.auth.AccessToken;
+
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.text.DecimalFormat;
+import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 
 /**
  * Demo Flume source that connects via Streaming API to the 1% sample twitter
@@ -135,7 +133,9 @@ public class TwitterSource
     totalTextIndexed = 0;
     skippedDocs = 0;
     batchEndTime = System.currentTimeMillis() + maxBatchDurationMillis;
-    twitterStream.sample();
+    // twitterStream.sample();
+    //
+    twitterStream.firehose(150000);
     LOGGER.info("Twitter source {} started.", getName());
     // This should happen at the end of the start method, since this will 
     // change the lifecycle status of the component to tell the Flume 
@@ -235,6 +235,9 @@ public class TwitterSource
     fields.add(new Field("expanded_url",
                          createOptional(Schema.create(Type.STRING)),
                          null, null));
+    fields.add(new Field("lang",
+        createOptional(Schema.create(Type.STRING)),
+        null, null));
     avroSchema.setFields(fields);
     return avroSchema;
   }
@@ -252,6 +255,7 @@ public class TwitterSource
 
     addString(doc, "source", status.getSource());
     addString(doc, "text", status.getText());
+    addString(doc, "lang", status.getLang());
 
     MediaEntity[] mediaEntities = status.getMediaEntities();
     if (mediaEntities.length > 0) {
@@ -266,6 +270,7 @@ public class TwitterSource
     addString(doc, "user_description", user.getDescription());
     addString(doc, "user_screen_name", user.getScreenName());
     addString(doc, "user_name", user.getName());
+
     return doc;
   }
 

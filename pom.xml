@@ -537,7 +537,7 @@ limitations under the License.
         <plugin>
           <groupId>org.apache.rat</groupId>
           <artifactId>apache-rat-plugin</artifactId>
-          <version>0.7</version>
+          <version>0.10</version>
           <executions>
             <execution>
               <id>verify.rat</id>
@@ -547,10 +547,10 @@ limitations under the License.
               </goals>
               <configuration>
                 <excludes>
-                  <exclude>**/.idea/</exclude>
+	          <exclude>**/.idea/</exclude>
                   <exclude>**/*.iml</exclude>
                   <exclude>**/nb-configuration.xml</exclude>
-                  <exclude>.git/</exclude>
+                  <exclude>**/.git/</exclude>
                   <exclude>patchprocess/</exclude>
                   <exclude>.gitignore</exclude>
                   <!-- ASF jenkins box puts the Maven repo in our root directory. -->
@@ -1089,17 +1089,17 @@ limitations under the License.
       <dependency>
         <groupId>org.twitter4j</groupId>
         <artifactId>twitter4j-core</artifactId>
-        <version>3.0.3</version>
+        <version>3.0.6</version>
       </dependency>
       <dependency>
         <groupId>org.twitter4j</groupId>
         <artifactId>twitter4j-media-support</artifactId>
-        <version>3.0.3</version>
+        <version>3.0.6</version>
       </dependency>
       <dependency>
         <groupId>org.twitter4j</groupId>
         <artifactId>twitter4j-stream</artifactId>
-        <version>3.0.3</version>
+        <version>3.0.6</version>
       </dependency>
 
       <dependency>
