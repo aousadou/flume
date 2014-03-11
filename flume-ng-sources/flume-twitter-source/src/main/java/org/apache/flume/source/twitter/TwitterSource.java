@@ -155,6 +155,7 @@ public class TwitterSource
 
   public void onStatus(Status status)  {
     Record doc = extractRecord("", avroSchema, status);
+    LOGGER.info("Extracted record is : "  + doc.toString());
     if (doc == null) {
       return; // skip
     }
@@ -214,8 +215,11 @@ public class TwitterSource
     fields.add(new Field("text",
                          createOptional(Schema.create(Type.STRING)),
                          null, null));
+    fields.add(new Field("lang",
+                         createOptional(Schema.create(Type.STRING)),
+                         null, null));
     fields.add(new Field("retweet_count",
-                         createOptional(Schema.create(Type.LONG)),
+                         createOptional(Schema.create(Type.INT)),
                          null, null));
     fields.add(new Field("retweeted",
                          createOptional(Schema.create(Type.BOOLEAN)),
@@ -235,9 +239,6 @@ public class TwitterSource
     fields.add(new Field("expanded_url",
                          createOptional(Schema.create(Type.STRING)),
                          null, null));
-    fields.add(new Field("lang",
-        createOptional(Schema.create(Type.STRING)),
-        null, null));
     avroSchema.setFields(fields);
     return avroSchema;
   }
@@ -255,13 +256,13 @@ public class TwitterSource
 
     addString(doc, "source", status.getSource());
     addString(doc, "text", status.getText());
+    addString(doc, "lang", status.getLang());
 
     MediaEntity[] mediaEntities = status.getMediaEntities();
     if (mediaEntities.length > 0) {
       addString(doc, "media_url_https", mediaEntities[0].getMediaURLHttps());
       addString(doc, "expanded_url", mediaEntities[0].getExpandedURL());
     }
-    addString(doc, "lang", status.getLang());
 
     doc.put("user_friends_count", user.getFriendsCount());
     doc.put("user_statuses_count", user.getStatusesCount());
