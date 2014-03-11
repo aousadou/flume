@@ -23,7 +23,7 @@ limitations under the License.
   <parent>
     <artifactId>flume-parent</artifactId>
     <groupId>org.apache.flume</groupId>
-    <version>1.3.0-SNAPSHOT</version>
+    <version>1.5.0-SNAPSHOT</version>
   </parent>
 
   <groupId>org.apache.flume</groupId>
@@ -44,5 +44,35 @@ limitations under the License.
     <module>flume-hdfs-sink</module>
     <module>flume-irc-sink</module>
     <module>flume-ng-hbase-sink</module>
+    <module>flume-ng-elasticsearch-sink</module>
   </modules>
+
+  <profiles>
+
+    <profile>
+      <id>hadoop-1.0</id>
+      <activation>
+        <property>
+          <name>!hadoop.profile</name>
+        </property>
+      </activation>
+    </profile>
+
+    <profile>
+      <id>hadoop-2</id>
+      <activation>
+        <property>
+          <name>hadoop.profile</name>
+          <value>2</value>
+        </property>
+      </activation>
+      <!-- add the flume-dataset-sink, which is only compatible with hadoop-2
+           -->
+      <modules>
+        <module>flume-dataset-sink</module>
+      </modules>
+    </profile>
+
+  </profiles>
+
 </project>

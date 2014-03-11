@@ -18,8 +18,6 @@
  */
 package org.apache.flume.instrumentation;
 
-import com.google.common.base.Throwables;
-import java.lang.management.ManagementFactory;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
@@ -28,19 +26,15 @@ import java.net.SocketAddress;
 import java.net.SocketException;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
+import java.util.Map;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
-import javax.management.Attribute;
-import javax.management.AttributeList;
-import javax.management.MBeanAttributeInfo;
-import javax.management.MBeanServer;
-import javax.management.ObjectInstance;
 import org.apache.flume.Context;
 import org.apache.flume.FlumeException;
 import org.apache.flume.api.HostInfo;
 import org.apache.flume.conf.ConfigurationException;
+import org.apache.flume.instrumentation.util.JMXPollUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -49,19 +43,16 @@ import org.slf4j.LoggerFactory;
  * once every 60 seconds). This implementation can send data to ganglia 3 and
  * ganglia 3.1. <p>
  *
- * <b>Mandatory Parameters:</b><p>
- * <tt>hosts: </tt> List of comma separated hostname:ports of ganglia
- * servers to report metrics to. <p>
- * <b>Optional Parameters: </b><p>
- * <tt>pollFrequency:</tt>Interval in seconds between consecutive reports to
- * ganglia servers. Default = 60 seconds.<p>
+ * <b>Mandatory Parameters:</b><p> <tt>hosts: </tt> List of comma separated
+ * hostname:ports of ganglia servers to report metrics to. <p> <b>Optional
+ * Parameters: </b><p> <tt>pollFrequency:</tt>Interval in seconds between
+ * consecutive reports to ganglia servers. Default = 60 seconds.<p>
  * <tt>isGanglia3:</tt> Report to ganglia 3 ? Default = false - reports to
  * ganglia 3.1.
  *
  *
  *
  */
-
 public class GangliaServer implements MonitorService {
   /*
    * The Ganglia protocol specific stuff: the xdr_* methods
@@ -240,7 +231,14 @@ public class GangliaServer implements MonitorService {
             + name + ": " + value);
     name = hostname + "." + name;
     xdr_int(0);
-    xdr_string("float");
+    String type = "string";
+    try {
+      Float.parseFloat(value);
+      type = "float";
+    } catch (NumberFormatException ex) {
+      // The param is a string, and so leave the type as is.
+    }
+    xdr_string(type); // metric type
     xdr_string(name);
     xdr_string(value);
     xdr_string(DEFAULT_UNITS);
@@ -256,7 +254,14 @@ public class GangliaServer implements MonitorService {
     xdr_string(hostname); // hostname
     xdr_string(name); // metric name
     xdr_int(0); // spoof = False
-    xdr_string("float"); // metric type
+    String type = "string";
+    try {
+      Float.parseFloat(value);
+      type = "float";
+    } catch (NumberFormatException ex) {
+      // The param is a string, and so leave the type as is.
+    }
+    xdr_string(type); // metric type
     xdr_string(name); // metric name
     xdr_string(DEFAULT_UNITS); // units
     xdr_int(DEFAULT_SLOPE); // slope
@@ -284,13 +289,12 @@ public class GangliaServer implements MonitorService {
   public void configure(Context context) {
     this.pollFrequency = context.getInteger(this.CONF_POLL_FREQUENCY, 60);
     String localHosts = context.getString(this.CONF_HOSTS);
-    if(localHosts == null || localHosts.isEmpty()){
+    if (localHosts == null || localHosts.isEmpty()) {
       throw new ConfigurationException("Hosts list cannot be empty.");
     }
     this.hosts = this.getHostsFromString(localHosts);
     this.isGanglia3 = context.getBoolean(this.CONF_ISGANGLIA3, false);
   }
-
 
   private List<HostInfo> getHostsFromString(String hosts)
           throws FlumeException {
@@ -316,6 +320,7 @@ public class GangliaServer implements MonitorService {
     }
     return hostInfoList;
   }
+
   /**
    * Worker which polls JMX for all mbeans with
    * {@link javax.management.ObjectName} within the flume namespace:
@@ -326,53 +331,28 @@ public class GangliaServer implements MonitorService {
   protected class GangliaCollector implements Runnable {
 
     private GangliaServer server;
-    private final MBeanServer mbeanServer = ManagementFactory.
-            getPlatformMBeanServer();
 
     @Override
     public void run() {
       try {
-        Set<ObjectInstance> queryMBeans = null;
-        try {
-          queryMBeans = mbeanServer.queryMBeans(
-                  null, null);
-        } catch (Exception ex) {
-          logger.error("Could not get Mbeans for monitoring", ex);
-          Throwables.propagate(ex);
-        }
-        for (ObjectInstance obj : queryMBeans) {
-          try {
-            if (!obj.getObjectName().toString().startsWith("org.apache.flume")) {
-              continue;
+        Map<String, Map<String, String>> metricsMap =
+                JMXPollUtil.getAllMBeans();
+        for (String component : metricsMap.keySet()) {
+          Map<String, String> attributeMap = metricsMap.get(component);
+          for (String attribute : attributeMap.keySet()) {
+            if (isGanglia3) {
+              server.createGangliaMessage(GANGLIA_CONTEXT + component + "."
+                      + attribute,
+                      attributeMap.get(attribute));
+            } else {
+              server.createGangliaMessage31(GANGLIA_CONTEXT + component + "."
+                      + attribute,
+                      attributeMap.get(attribute));
             }
-            MBeanAttributeInfo[] attrs = mbeanServer.
-                    getMBeanInfo(obj.getObjectName()).getAttributes();
-            String strAtts[] = new String[attrs.length];
-            for (int i = 0; i < strAtts.length; i++) {
-              strAtts[i] = attrs[i].getName();
-            }
-            AttributeList attrList = mbeanServer.getAttributes(
-                    obj.getObjectName(), strAtts);
-            String component = obj.getObjectName().toString().substring(
-                obj.getObjectName().toString().indexOf('=') + 1);
-            for (Object attr : attrList) {
-              Attribute localAttr = (Attribute) attr;
-              if (isGanglia3) {
-                server.createGangliaMessage(GANGLIA_CONTEXT + component + "."
-                        + localAttr.getName(),
-                        localAttr.getValue().toString());
-              } else {
-                server.createGangliaMessage31(GANGLIA_CONTEXT + component + "."
-                        + localAttr.getName(),
-                        localAttr.getValue().toString());
-              }
-              server.sendToGangliaNodes();
-            }
-          } catch (Exception ex) {
-            logger.error("Error getting mbean attributes", ex);
+            server.sendToGangliaNodes();
           }
         }
-      } catch(Throwable t) {
+      } catch (Throwable t) {
         logger.error("Unexpected error", t);
       }
     }

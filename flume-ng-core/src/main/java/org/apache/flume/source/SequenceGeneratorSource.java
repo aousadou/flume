@@ -19,40 +19,91 @@
 
 package org.apache.flume.source;
 
+import java.util.ArrayList;
+import java.util.List;
 import org.apache.flume.ChannelException;
-import org.apache.flume.CounterGroup;
+import org.apache.flume.Context;
+import org.apache.flume.Event;
 import org.apache.flume.EventDeliveryException;
 import org.apache.flume.PollableSource;
+import org.apache.flume.conf.Configurable;
 import org.apache.flume.event.EventBuilder;
+import org.apache.flume.instrumentation.SourceCounter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 public class SequenceGeneratorSource extends AbstractSource implements
-    PollableSource {
+    PollableSource, Configurable {
 
   private static final Logger logger = LoggerFactory
       .getLogger(SequenceGeneratorSource.class);
 
   private long sequence;
-  private CounterGroup counterGroup;
+  private int batchSize;
+  private SourceCounter sourceCounter;
+  private List<Event> batchArrayList;
+  private long totalEvents;
+  private long eventsSent = 0;
 
   public SequenceGeneratorSource() {
     sequence = 0;
-    counterGroup = new CounterGroup();
+  }
+
+  /**
+   * Read parameters from context
+   * <li>batchSize = type int that defines the size of event batches
+   */
+  @Override
+  public void configure(Context context) {
+    batchSize = context.getInteger("batchSize", 1);
+    if (batchSize > 1) {
+      batchArrayList = new ArrayList<Event>(batchSize);
+    }
+    totalEvents = context.getLong("totalEvents", Long.MAX_VALUE);
+    if (sourceCounter == null) {
+      sourceCounter = new SourceCounter(getName());
+    }
   }
 
   @Override
   public Status process() throws EventDeliveryException {
 
+    Status status = Status.READY;
+    int i = 0;
     try {
-      getChannelProcessor().processEvent(
-          EventBuilder.withBody(String.valueOf(sequence++).getBytes()));
-      counterGroup.incrementAndGet("events.successful");
+      if (batchSize <= 1) {
+        if(eventsSent < totalEvents) {
+          getChannelProcessor().processEvent(
+            EventBuilder.withBody(String.valueOf(sequence++).getBytes()));
+          sourceCounter.incrementEventAcceptedCount();
+          eventsSent++;
+        } else {
+          status = Status.BACKOFF;
+        }
+      } else {
+        batchArrayList.clear();
+        for (i = 0; i < batchSize; i++) {
+          if(eventsSent < totalEvents){
+            batchArrayList.add(i, EventBuilder.withBody(String
+              .valueOf(sequence++).getBytes()));
+            eventsSent++;
+          } else {
+            status = Status.BACKOFF;
+          }
+        }
+        if(!batchArrayList.isEmpty()) {
+          getChannelProcessor().processEventBatch(batchArrayList);
+          sourceCounter.incrementAppendBatchAcceptedCount();
+          sourceCounter.addToEventAcceptedCount(batchArrayList.size());
+        }
+      }
+
     } catch (ChannelException ex) {
-      counterGroup.incrementAndGet("events.failed");
+      eventsSent -= i;
+      logger.error( getName() + " source could not write to channel.", ex);
     }
 
-    return Status.READY;
+    return status;
   }
 
   @Override
@@ -60,7 +111,7 @@ public class SequenceGeneratorSource extends AbstractSource implements
     logger.info("Sequence generator source starting");
 
     super.start();
-
+    sourceCounter.start();
     logger.debug("Sequence generator source started");
   }
 
@@ -69,8 +120,9 @@ public class SequenceGeneratorSource extends AbstractSource implements
     logger.info("Sequence generator source stopping");
 
     super.stop();
+    sourceCounter.stop();
 
-    logger.info("Sequence generator source stopped. Metrics:{}", counterGroup);
+    logger.info("Sequence generator source stopped. Metrics:{}",getName(), sourceCounter);
   }
 
 }

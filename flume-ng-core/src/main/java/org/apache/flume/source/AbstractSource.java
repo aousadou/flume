@@ -20,11 +20,15 @@
 package org.apache.flume.source;
 
 import org.apache.flume.Source;
+import org.apache.flume.annotations.InterfaceAudience;
+import org.apache.flume.annotations.InterfaceStability;
 import org.apache.flume.channel.ChannelProcessor;
 import org.apache.flume.lifecycle.LifecycleState;
 
 import com.google.common.base.Preconditions;
 
+@InterfaceAudience.Public
+@InterfaceStability.Stable
 abstract public class AbstractSource implements Source {
 
   private ChannelProcessor channelProcessor;
@@ -73,4 +77,8 @@ abstract public class AbstractSource implements Source {
   public synchronized String getName() {
     return name;
   }
+
+  public String toString() {
+	  return this.getClass().getName() + "{name:" + name + ",state:" + lifecycleState +"}";
+  }  
 }

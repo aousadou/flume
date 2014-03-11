@@ -28,8 +28,8 @@ import org.apache.flume.conf.ComponentConfigurationFactory;
 import org.apache.flume.conf.ConfigurationException;
 import org.apache.flume.conf.FlumeConfiguration;
 import org.apache.flume.conf.FlumeConfigurationError;
-import org.apache.flume.conf.FlumeConfigurationErrorType;
 import org.apache.flume.conf.FlumeConfigurationError.ErrorOrWarning;
+import org.apache.flume.conf.FlumeConfigurationErrorType;
 import org.apache.flume.conf.channel.ChannelSelectorConfiguration;
 import org.apache.flume.conf.channel.ChannelSelectorConfiguration.ChannelSelectorConfigurationType;
 import org.apache.flume.conf.channel.ChannelSelectorType;
@@ -40,6 +40,7 @@ public class SourceConfiguration extends ComponentConfiguration {
 
   public SourceConfiguration(String componentName) {
     super(componentName);
+    channels = new HashSet<String>();
   }
 
   public Set<String> getChannels() {
@@ -72,7 +73,6 @@ public class SourceConfiguration extends ComponentConfiguration {
       String selType;
       if (selectorParams != null && !selectorParams.isEmpty()) {
         selType = selectorParams.get(BasicConfigurationConstants.CONFIG_TYPE);
-        System.out.println("Loading selector: " + selType);
       } else {
         selType = ChannelSelectorConfigurationType.REPLICATING.toString();
       }
@@ -170,8 +170,43 @@ public class SourceConfiguration extends ComponentConfiguration {
      *
      * @see org.apache.flume.source.SyslogUDPSource
      */
+    SYSLOGUDP("org.apache.flume.conf.source.SyslogUDPSourceConfiguration"),
 
-    SYSLOGUDP("org.apache.flume.conf.source.SyslogUDPSourceConfiguration");
+    /**
+     * Multiport Syslog TCP Source
+     *
+     * @see org.apache.flume.source.MultiportSyslogTCPSource
+     *
+     */
+    MULTIPORT_SYSLOGTCP("org.apache.flume.source.MultiportSyslogTCPSourceConfiguration"),
+
+    /**
+     * Spool directory source
+     *
+     * @see org.apache.flume.source.SpoolDirectorySource
+     */
+    SPOOLDIR("org.apache.flume.conf.source.SpoolDirectorySourceConfiguration"),
+
+    /**
+     * HTTP Source
+     *
+     * @see org.apache.flume.source.http.HTTPSource
+     */
+    HTTP("org.apache.flume.source.http.HTTPSourceConfiguration"),
+
+    /**
+     * HTTP Source
+     *
+     * @see org.apache.flume.source.ThriftSource
+     */
+    THRIFT("org.apache.flume.source.http.ThriftSourceConfiguration"),
+
+    /**
+     * JMS Source
+     *
+     * @see org.apache.flume.source.jms.JMSSource
+     */
+    JMS("org.apache.flume.conf.source.jms.JMSSourceConfiguration");
 
     private String srcConfigurationName;
 

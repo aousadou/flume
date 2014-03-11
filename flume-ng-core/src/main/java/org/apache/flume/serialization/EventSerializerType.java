@@ -18,8 +18,14 @@
  */
 package org.apache.flume.serialization;
 
+import org.apache.flume.annotations.InterfaceAudience;
+import org.apache.flume.annotations.InterfaceStability;
+
+@InterfaceAudience.Private
+@InterfaceStability.Unstable
 public enum EventSerializerType {
   TEXT(BodyTextEventSerializer.Builder.class),
+  HEADER_AND_TEXT(HeaderAndBodyTextEventSerializer.Builder.class),
   AVRO_EVENT(FlumeEventAvroEventSerializer.Builder.class),
   OTHER(null);
 

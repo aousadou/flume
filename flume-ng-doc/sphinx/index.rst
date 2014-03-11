@@ -15,7 +15,7 @@
 
 
 ================================================
-Apache Flume 1.3.0-SNAPSHOT documentation
+Apache Flume 1.5.0-SNAPSHOT documentation
 ================================================
 
 Flume is a distributed, reliable, and available system for efficiently
@@ -50,7 +50,7 @@ Overview
 - `Flume Wiki <http://cwiki.apache.org/confluence/display/FLUME>`_
 - `Getting Started Guide <http://cwiki.apache.org/confluence/display/FLUME/Getting+Started>`_
 - `Flume Issue Tracking (JIRA) <https://issues.apache.org/jira/browse/FLUME>`_
-- `Flume Source Code (SVN) <http://svn.apache.org/repos/asf/flume/>`_
+- `Flume Source Code (GIT) <https://git-wip-us.apache.org/repos/asf?p=flume.git;a=tree;h=refs/heads/trunk;hb=trunk>`_
 
 Documentation
 -------------

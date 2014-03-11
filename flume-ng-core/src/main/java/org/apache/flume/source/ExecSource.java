@@ -27,21 +27,27 @@ import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
 import org.apache.flume.Channel;
 import org.apache.flume.Context;
-import org.apache.flume.CounterGroup;
 import org.apache.flume.Event;
 import org.apache.flume.EventDrivenSource;
 import org.apache.flume.Source;
+import org.apache.flume.SystemClock;
 import org.apache.flume.channel.ChannelProcessor;
 import org.apache.flume.conf.Configurable;
 import org.apache.flume.event.EventBuilder;
+import org.apache.flume.instrumentation.SourceCounter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.google.common.base.Preconditions;
+import com.google.common.util.concurrent.ThreadFactoryBuilder;
+
+import java.nio.charset.Charset;
 
 /**
  * <p>
@@ -139,26 +145,27 @@ Configurable {
   private static final Logger logger = LoggerFactory
       .getLogger(ExecSource.class);
 
-
+  private String shell;
   private String command;
-  private CounterGroup counterGroup;
+  private SourceCounter sourceCounter;
   private ExecutorService executor;
   private Future<?> runnerFuture;
   private long restartThrottle;
   private boolean restart;
   private boolean logStderr;
   private Integer bufferCount;
+  private long batchTimeout;
   private ExecRunnable runner;
+  private Charset charset;
 
   @Override
   public void start() {
     logger.info("Exec source starting with command:{}", command);
 
     executor = Executors.newSingleThreadExecutor();
-    counterGroup = new CounterGroup();
 
-    runner = new ExecRunnable(command, getChannelProcessor(), counterGroup,
-        restart, restartThrottle, logStderr, bufferCount);
+    runner = new ExecRunnable(shell, command, getChannelProcessor(), sourceCounter,
+        restart, restartThrottle, logStderr, bufferCount, batchTimeout, charset);
 
     // FIXME: Use a callback-like executor / future to signal us upon failure.
     runnerFuture = executor.submit(runner);
@@ -168,6 +175,7 @@ Configurable {
      * it sets our state to running. We want to make sure the executor is alive
      * and well first.
      */
+    sourceCounter.start();
     super.start();
 
     logger.debug("Exec source started");
@@ -176,16 +184,16 @@ Configurable {
   @Override
   public void stop() {
     logger.info("Stopping exec source with command:{}", command);
-
     if(runner != null) {
       runner.setRestart(false);
+      runner.kill();
     }
+
     if (runnerFuture != null) {
       logger.debug("Stopping exec runner");
       runnerFuture.cancel(true);
       logger.debug("Exec runner stopped");
     }
-
     executor.shutdown();
 
     while (!executor.isTerminated()) {
@@ -199,10 +207,11 @@ Configurable {
       }
     }
 
+    sourceCounter.stop();
     super.stop();
 
     logger.debug("Exec source with command:{} stopped. Metrics:{}", command,
-        counterGroup);
+        sourceCounter);
   }
 
   @Override
@@ -223,61 +232,116 @@ Configurable {
 
     bufferCount = context.getInteger(ExecSourceConfigurationConstants.CONFIG_BATCH_SIZE,
         ExecSourceConfigurationConstants.DEFAULT_BATCH_SIZE);
+
+    batchTimeout = context.getLong(ExecSourceConfigurationConstants.CONFIG_BATCH_TIME_OUT,
+        ExecSourceConfigurationConstants.DEFAULT_BATCH_TIME_OUT);
+
+    charset = Charset.forName(context.getString(ExecSourceConfigurationConstants.CHARSET,
+        ExecSourceConfigurationConstants.DEFAULT_CHARSET));
+
+    shell = context.getString(ExecSourceConfigurationConstants.CONFIG_SHELL, null);
+
+    if (sourceCounter == null) {
+      sourceCounter = new SourceCounter(getName());
+    }
   }
 
   private static class ExecRunnable implements Runnable {
 
-    public ExecRunnable(String command, ChannelProcessor channelProcessor,
-        CounterGroup counterGroup, boolean restart, long restartThrottle,
-        boolean logStderr, int bufferCount) {
+    public ExecRunnable(String shell, String command, ChannelProcessor channelProcessor,
+        SourceCounter sourceCounter, boolean restart, long restartThrottle,
+        boolean logStderr, int bufferCount, long batchTimeout, Charset charset) {
       this.command = command;
       this.channelProcessor = channelProcessor;
-      this.counterGroup = counterGroup;
+      this.sourceCounter = sourceCounter;
       this.restartThrottle = restartThrottle;
       this.bufferCount = bufferCount;
+      this.batchTimeout = batchTimeout;
       this.restart = restart;
       this.logStderr = logStderr;
+      this.charset = charset;
+      this.shell = shell;
     }
 
-    private String command;
-    private ChannelProcessor channelProcessor;
-    private CounterGroup counterGroup;
+    private final String shell;
+    private final String command;
+    private final ChannelProcessor channelProcessor;
+    private final SourceCounter sourceCounter;
     private volatile boolean restart;
-    private long restartThrottle;
-    private int bufferCount;
-    private boolean logStderr;
+    private final long restartThrottle;
+    private final int bufferCount;
+    private long batchTimeout;
+    private final boolean logStderr;
+    private final Charset charset;
+    private Process process = null;
+    private SystemClock systemClock = new SystemClock();
+    private Long lastPushToChannel = systemClock.currentTimeMillis();
+    ScheduledExecutorService timedFlushService;
+    ScheduledFuture<?> future;
 
     @Override
     public void run() {
       do {
         String exitCode = "unknown";
         BufferedReader reader = null;
-        Process process = null;
+        String line = null;
+        final List<Event> eventList = new ArrayList<Event>();
+
+        timedFlushService = Executors.newSingleThreadScheduledExecutor(
+                new ThreadFactoryBuilder().setNameFormat(
+                "timedFlushExecService" +
+                Thread.currentThread().getId() + "-%d").build());
         try {
-          String[] commandArgs = command.split("\\s+");
-          process = new ProcessBuilder(commandArgs).start();
+          if(shell != null) {
+            String[] commandArgs = formulateShellCommand(shell, command);
+            process = Runtime.getRuntime().exec(commandArgs);
+          }  else {
+            String[] commandArgs = command.split("\\s+");
+            process = new ProcessBuilder(commandArgs).start();
+          }
           reader = new BufferedReader(
-              new InputStreamReader(process.getInputStream()));
+              new InputStreamReader(process.getInputStream(), charset));
 
           // StderrLogger dies as soon as the input stream is invalid
           StderrReader stderrReader = new StderrReader(new BufferedReader(
-              new InputStreamReader(process.getErrorStream())), logStderr);
+              new InputStreamReader(process.getErrorStream(), charset)), logStderr);
           stderrReader.setName("StderrReader-[" + command + "]");
           stderrReader.setDaemon(true);
           stderrReader.start();
 
-          String line = null;
-          List<Event> eventList = new ArrayList<Event>();
+          future = timedFlushService.scheduleWithFixedDelay(new Runnable() {
+              @Override
+              public void run() {
+                try {
+                  synchronized (eventList) {
+                    if(!eventList.isEmpty() && timeout()) {
+                      flushEventBatch(eventList);
+                    }
+                  }
+                } catch (Exception e) {
+                  logger.error("Exception occured when processing event batch", e);
+                  if(e instanceof InterruptedException) {
+                      Thread.currentThread().interrupt();
+                  }
+                }
+              }
+          },
+          batchTimeout, batchTimeout, TimeUnit.MILLISECONDS);
+
           while ((line = reader.readLine()) != null) {
-            counterGroup.incrementAndGet("exec.lines.read");
-            eventList.add(EventBuilder.withBody(line.getBytes()));
-            if(eventList.size() >= bufferCount) {
-              channelProcessor.processEventBatch(eventList);
-              eventList.clear();
+            synchronized (eventList) {
+              sourceCounter.incrementEventReceivedCount();
+              eventList.add(EventBuilder.withBody(line.getBytes(charset)));
+              if(eventList.size() >= bufferCount || timeout()) {
+                flushEventBatch(eventList);
+              }
             }
           }
-          if(!eventList.isEmpty()) {
-            channelProcessor.processEventBatch(eventList);
+
+          synchronized (eventList) {
+              if(!eventList.isEmpty()) {
+                flushEventBatch(eventList);
+              }
           }
         } catch (Exception e) {
           logger.error("Failed while running command: " + command, e);
@@ -292,24 +356,74 @@ Configurable {
               logger.error("Failed to close reader for exec source", ex);
             }
           }
-          if(process != null) {
-            process.destroy();
-            try {
-              exitCode = String.valueOf(process.waitFor());
-            } catch (InterruptedException ex) {
-              Thread.currentThread().interrupt();
-            }
-          }
+          exitCode = String.valueOf(kill());
         }
         if(restart) {
-          logger.info("Restarting in {}ms, exit code {}", restartThrottle, exitCode);
+          logger.info("Restarting in {}ms, exit code {}", restartThrottle,
+              exitCode);
           try {
             Thread.sleep(restartThrottle);
           } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
           }
+        } else {
+          logger.info("Command [" + command + "] exited with " + exitCode);
         }
       } while(restart);
+    }
+
+    private void flushEventBatch(List<Event> eventList){
+      channelProcessor.processEventBatch(eventList);
+      sourceCounter.addToEventAcceptedCount(eventList.size());
+      eventList.clear();
+      lastPushToChannel = systemClock.currentTimeMillis();
+    }
+
+    private boolean timeout(){
+      return (systemClock.currentTimeMillis() - lastPushToChannel) >= batchTimeout;
+    }
+
+    private static String[] formulateShellCommand(String shell, String command) {
+      String[] shellArgs = shell.split("\\s+");
+      String[] result = new String[shellArgs.length + 1];
+      System.arraycopy(shellArgs, 0, result, 0, shellArgs.length);
+      result[shellArgs.length] = command;
+      return result;
+    }
+
+    public int kill() {
+      if(process != null) {
+        synchronized (process) {
+          process.destroy();
+
+          try {
+            int exitValue = process.waitFor();
+
+            // Stop the Thread that flushes periodically
+            if (future != null) {
+                future.cancel(true);
+            }
+
+            if (timedFlushService != null) {
+              timedFlushService.shutdown();
+              while (!timedFlushService.isTerminated()) {
+                try {
+                  timedFlushService.awaitTermination(500, TimeUnit.MILLISECONDS);
+                } catch (InterruptedException e) {
+                  logger.debug("Interrupted while waiting for exec executor service "
+                    + "to stop. Just exiting.");
+                  Thread.currentThread().interrupt();
+                }
+              }
+            }
+            return exitValue;
+          } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+          }
+        }
+        return Integer.MIN_VALUE;
+      }
+      return Integer.MIN_VALUE / 2;
     }
     public void setRestart(boolean restart) {
       this.restart = restart;
@@ -318,10 +432,12 @@ Configurable {
   private static class StderrReader extends Thread {
     private BufferedReader input;
     private boolean logStderr;
+
     protected StderrReader(BufferedReader input, boolean logStderr) {
       this.input = input;
       this.logStderr = logStderr;
     }
+
     @Override
     public void run() {
       try {
@@ -329,6 +445,9 @@ Configurable {
         String line = null;
         while((line = input.readLine()) != null) {
           if(logStderr) {
+            // There is no need to read 'line' with a charset
+            // as we do not to propagate it.
+            // It is in UTF-16 and would be printed in UTF-8 format.
             logger.info("StderrLogger[{}] = '{}'", ++i, line);
           }
         }
@@ -344,6 +463,5 @@ Configurable {
         }
       }
     }
-
   }
 }

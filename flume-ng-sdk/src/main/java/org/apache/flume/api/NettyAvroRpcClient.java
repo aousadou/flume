@@ -18,9 +18,13 @@
  */
 package org.apache.flume.api;
 
+import java.io.FileInputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
+import java.security.KeyStore;
+import java.security.cert.X509Certificate;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.LinkedList;
@@ -30,6 +34,7 @@ import java.util.Properties;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -41,17 +46,29 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.ReentrantLock;
 
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLEngine;
+import javax.net.ssl.TrustManager;
+import javax.net.ssl.TrustManagerFactory;
+import javax.net.ssl.X509TrustManager;
+
 import org.apache.avro.ipc.CallFuture;
 import org.apache.avro.ipc.NettyTransceiver;
 import org.apache.avro.ipc.Transceiver;
 import org.apache.avro.ipc.specific.SpecificRequestor;
+import org.apache.commons.lang.StringUtils;
 import org.apache.flume.Event;
 import org.apache.flume.EventDeliveryException;
 import org.apache.flume.FlumeException;
 import org.apache.flume.source.avro.AvroFlumeEvent;
 import org.apache.flume.source.avro.AvroSourceProtocol;
 import org.apache.flume.source.avro.Status;
+import org.jboss.netty.channel.ChannelPipeline;
+import org.jboss.netty.channel.socket.SocketChannel;
 import org.jboss.netty.channel.socket.nio.NioClientSocketChannelFactory;
+import org.jboss.netty.handler.codec.compression.ZlibDecoder;
+import org.jboss.netty.handler.codec.compression.ZlibEncoder;
+import org.jboss.netty.handler.ssl.SslHandler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -72,11 +89,19 @@ implements RpcClient {
   private ConnState connState;
 
   private InetSocketAddress address;
+  private boolean enableSsl;
+  private boolean trustAllCerts;
+  private String truststore;
+  private String truststorePassword;
+  private String truststoreType;
 
   private Transceiver transceiver;
   private AvroSourceProtocol.Callback avroClient;
   private static final Logger logger = LoggerFactory
       .getLogger(NettyAvroRpcClient.class);
+  private boolean enableDeflateCompression;
+  private int compressionLevel;
+  private int maxIoWorkers;
 
   /**
    * This constructor is intended to be called from {@link RpcClientFactory}.
@@ -102,19 +127,62 @@ implements RpcClient {
   private void connect(long timeout, TimeUnit tu) throws FlumeException {
     callTimeoutPool = Executors.newCachedThreadPool(
         new TransceiverThreadFactory("Flume Avro RPC Client Call Invoker"));
+    NioClientSocketChannelFactory socketChannelFactory = null;
+
     try {
+
+      ExecutorService bossExecutor =
+        Executors.newCachedThreadPool(new TransceiverThreadFactory(
+          "Avro " + NettyTransceiver.class.getSimpleName() + " Boss"));
+      ExecutorService workerExecutor =
+        Executors.newCachedThreadPool(new TransceiverThreadFactory(
+          "Avro " + NettyTransceiver.class.getSimpleName() + " I/O Worker"));
+
+      if (enableDeflateCompression || enableSsl) {
+        if (maxIoWorkers >= 1) {
+          socketChannelFactory = new SSLCompressionChannelFactory(
+            bossExecutor, workerExecutor,
+            enableDeflateCompression, enableSsl, trustAllCerts,
+            compressionLevel, truststore, truststorePassword, truststoreType,
+            maxIoWorkers);
+        } else {
+          socketChannelFactory = new SSLCompressionChannelFactory(
+            bossExecutor, workerExecutor,
+            enableDeflateCompression, enableSsl, trustAllCerts,
+            compressionLevel, truststore, truststorePassword, truststoreType);
+        }
+      } else {
+        if (maxIoWorkers >= 1) {
+          socketChannelFactory = new NioClientSocketChannelFactory(
+              bossExecutor, workerExecutor, maxIoWorkers);
+        } else {
+          socketChannelFactory = new NioClientSocketChannelFactory(
+              bossExecutor, workerExecutor);
+        }
+      }
+
       transceiver = new NettyTransceiver(this.address,
-          new NioClientSocketChannelFactory(
-        Executors.newCachedThreadPool(new TransceiverThreadFactory(
-            "Avro " + NettyTransceiver.class.getSimpleName() + " Boss")),
-        Executors.newCachedThreadPool(new TransceiverThreadFactory(
-            "Avro " + NettyTransceiver.class.getSimpleName() + " I/O Worker"))),
+          socketChannelFactory,
           tu.toMillis(timeout));
       avroClient =
           SpecificRequestor.getClient(AvroSourceProtocol.Callback.class,
           transceiver);
-    } catch (IOException ex) {
-      throw new FlumeException(this + ": RPC connection error", ex);
+    } catch (Throwable t) {
+      if (callTimeoutPool != null) {
+        callTimeoutPool.shutdownNow();
+      }
+      if (socketChannelFactory != null) {
+        socketChannelFactory.releaseExternalResources();
+      }
+      if (t instanceof IOException) {
+        throw new FlumeException(this + ": RPC connection error", t);
+      } else if (t instanceof FlumeException) {
+        throw (FlumeException) t;
+      } else if (t instanceof Error) {
+        throw (Error) t;
+      } else {
+        throw new FlumeException(this + ": Unexpected exception", t);
+      }
     }
 
     setState(ConnState.READY);
@@ -124,17 +192,24 @@ implements RpcClient {
   public void close() throws FlumeException {
     if (callTimeoutPool != null) {
       callTimeoutPool.shutdown();
-      while (!callTimeoutPool.isTerminated()) {
-        try {
-          callTimeoutPool.awaitTermination(requestTimeout,
-              TimeUnit.MILLISECONDS);
-        } catch (InterruptedException ex) {
-          logger.warn(this + ": Interrupted during close", ex);
+      try {
+        if (!callTimeoutPool.awaitTermination(requestTimeout,
+            TimeUnit.MILLISECONDS)) {
           callTimeoutPool.shutdownNow();
-          Thread.currentThread().interrupt();
-          break;
+          if (!callTimeoutPool.awaitTermination(requestTimeout,
+              TimeUnit.MILLISECONDS)) {
+            logger.warn(this + ": Unable to cleanly shut down call timeout " +
+                "pool");
+          }
         }
+      } catch (InterruptedException ex) {
+        logger.warn(this + ": Interrupted during close", ex);
+        // re-cancel if current thread also interrupted
+        callTimeoutPool.shutdownNow();
+        // preserve interrupt status
+        Thread.currentThread().interrupt();
       }
+
       callTimeoutPool = null;
     }
     try {
@@ -504,6 +579,48 @@ implements RpcClient {
       }
     }
 
+    String enableCompressionStr = properties.getProperty(RpcClientConfigurationConstants.CONFIG_COMPRESSION_TYPE);
+    if (enableCompressionStr != null && enableCompressionStr.equalsIgnoreCase("deflate")) {
+      this.enableDeflateCompression = true;
+      String compressionLvlStr = properties.getProperty(RpcClientConfigurationConstants.CONFIG_COMPRESSION_LEVEL);
+      compressionLevel = RpcClientConfigurationConstants.DEFAULT_COMPRESSION_LEVEL;
+      if (compressionLvlStr != null) {
+        try {
+          compressionLevel = Integer.parseInt(compressionLvlStr);
+        } catch (NumberFormatException ex) {
+          logger.error("Invalid compression level: " + compressionLvlStr);
+        }
+      }
+    }
+
+    enableSsl = Boolean.parseBoolean(properties.getProperty(
+        RpcClientConfigurationConstants.CONFIG_SSL));
+    trustAllCerts = Boolean.parseBoolean(properties.getProperty(
+        RpcClientConfigurationConstants.CONFIG_TRUST_ALL_CERTS));
+    truststore = properties.getProperty(
+        RpcClientConfigurationConstants.CONFIG_TRUSTSTORE);
+    truststorePassword = properties.getProperty(
+        RpcClientConfigurationConstants.CONFIG_TRUSTSTORE_PASSWORD);
+    truststoreType = properties.getProperty(
+        RpcClientConfigurationConstants.CONFIG_TRUSTSTORE_TYPE, "JKS");
+
+    String maxIoWorkersStr = properties.getProperty(
+      RpcClientConfigurationConstants.MAX_IO_WORKERS);
+    if (!StringUtils.isEmpty(maxIoWorkersStr)) {
+      try {
+        maxIoWorkers = Integer.parseInt(maxIoWorkersStr);
+      } catch (NumberFormatException ex) {
+        logger.warn ("Invalid maxIOWorkers:" + maxIoWorkersStr + " Using " +
+          "default maxIOWorkers.");
+        maxIoWorkers = -1;
+      }
+    }
+
+    if (maxIoWorkers < 1) {
+      logger.warn("Using default maxIOWorkers");
+      maxIoWorkers = -1;
+    }
+
     this.connect();
   }
 
@@ -536,6 +653,119 @@ implements RpcClient {
       thread.setDaemon(true);
       thread.setName(prefix + " " + threadId.incrementAndGet());
       return thread;
+    }
+  }
+
+  /**
+   * Factory of SSL-enabled client channels
+   * Copied from Avro's org.apache.avro.ipc.TestNettyServerWithSSL test
+   */
+  private static class SSLCompressionChannelFactory extends NioClientSocketChannelFactory {
+
+    private final boolean enableCompression;
+    private final int compressionLevel;
+    private final boolean enableSsl;
+    private final boolean trustAllCerts;
+    private final String truststore;
+    private final String truststorePassword;
+    private final String truststoreType;
+
+    public SSLCompressionChannelFactory(Executor bossExecutor, Executor workerExecutor,
+        boolean enableCompression, boolean enableSsl, boolean trustAllCerts,
+        int compressionLevel, String truststore, String truststorePassword,
+        String truststoreType) {
+      super(bossExecutor, workerExecutor);
+      this.enableCompression = enableCompression;
+      this.enableSsl = enableSsl;
+      this.compressionLevel = compressionLevel;
+      this.trustAllCerts = trustAllCerts;
+      this.truststore = truststore;
+      this.truststorePassword = truststorePassword;
+      this.truststoreType = truststoreType;
+    }
+
+    public SSLCompressionChannelFactory(Executor bossExecutor, Executor workerExecutor,
+        boolean enableCompression, boolean enableSsl, boolean trustAllCerts,
+        int compressionLevel, String truststore, String truststorePassword,
+        String truststoreType, int maxIOWorkers) {
+      super(bossExecutor, workerExecutor, maxIOWorkers);
+      this.enableCompression = enableCompression;
+      this.enableSsl = enableSsl;
+      this.compressionLevel = compressionLevel;
+      this.trustAllCerts = trustAllCerts;
+      this.truststore = truststore;
+      this.truststorePassword = truststorePassword;
+      this.truststoreType = truststoreType;
+    }
+
+    @Override
+    public SocketChannel newChannel(ChannelPipeline pipeline) {
+      TrustManager[] managers;
+      try {
+        if (enableCompression) {
+          ZlibEncoder encoder = new ZlibEncoder(compressionLevel);
+          pipeline.addFirst("deflater", encoder);
+          pipeline.addFirst("inflater", new ZlibDecoder());
+        }
+        if (enableSsl) {
+          if (trustAllCerts) {
+            logger.warn("No truststore configured, setting TrustManager to accept"
+                + " all server certificates");
+            managers = new TrustManager[] { new PermissiveTrustManager() };
+          } else {
+            KeyStore keystore = null;
+
+            if (truststore != null) {
+              if (truststorePassword == null) {
+                throw new NullPointerException("truststore password is null");
+              }
+              InputStream truststoreStream = new FileInputStream(truststore);
+              keystore = KeyStore.getInstance(truststoreType);
+              keystore.load(truststoreStream, truststorePassword.toCharArray());
+            }
+
+            TrustManagerFactory tmf = TrustManagerFactory.getInstance("SunX509");
+            // null keystore is OK, with SunX509 it defaults to system CA Certs
+            // see http://docs.oracle.com/javase/6/docs/technotes/guides/security/jsse/JSSERefGuide.html#X509TrustManager
+            tmf.init(keystore);
+            managers = tmf.getTrustManagers();
+          }
+
+          SSLContext sslContext = SSLContext.getInstance("TLS");
+          sslContext.init(null, managers, null);
+          SSLEngine sslEngine = sslContext.createSSLEngine();
+          sslEngine.setUseClientMode(true);
+          // addFirst() will make SSL handling the first stage of decoding
+          // and the last stage of encoding this must be added after
+          // adding compression handling above
+          pipeline.addFirst("ssl", new SslHandler(sslEngine));
+        }
+
+        return super.newChannel(pipeline);
+      } catch (Exception ex) {
+        logger.error("Cannot create SSL channel", ex);
+        throw new RuntimeException("Cannot create SSL channel", ex);
+      }
+    }
+  }
+
+  /**
+   * Permissive trust manager accepting any certificate
+   */
+  private static class PermissiveTrustManager implements X509TrustManager {
+    @Override
+    public void checkClientTrusted(X509Certificate[] certs, String s) {
+      // nothing
+    }
+
+    @Override
+    public void checkServerTrusted(X509Certificate[] certs, String s) {
+      // nothing
+    }
+
+    @Override
+    public X509Certificate[] getAcceptedIssuers() {
+      return new X509Certificate[0];
     }
   }
 }

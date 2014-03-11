@@ -28,12 +28,12 @@ import java.util.concurrent.TimeUnit;
 
 import org.apache.flume.Channel;
 import org.apache.flume.Context;
-import org.apache.flume.CounterGroup;
 import org.apache.flume.Event;
 import org.apache.flume.EventDeliveryException;
 import org.apache.flume.Transaction;
 import org.apache.flume.conf.Configurable;
 import org.apache.flume.formatter.output.PathManager;
+import org.apache.flume.instrumentation.SinkCounter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -47,39 +47,39 @@ public class RollingFileSink extends AbstractSink implements Configurable {
   private static final Logger logger = LoggerFactory
       .getLogger(RollingFileSink.class);
   private static final long defaultRollInterval = 30;
+  private static final int defaultBatchSize = 100;
+
+  private int batchSize = defaultBatchSize;
 
   private File directory;
   private long rollInterval;
   private OutputStream outputStream;
   private ScheduledExecutorService rollService;
 
-  private Context context;
-
   private String serializerType;
   private Context serializerContext;
   private EventSerializer serializer;
 
-  private CounterGroup counterGroup;
+  private SinkCounter sinkCounter;
 
   private PathManager pathController;
   private volatile boolean shouldRotate;
 
   public RollingFileSink() {
-    counterGroup = new CounterGroup();
     pathController = new PathManager();
     shouldRotate = false;
   }
 
   @Override
   public void configure(Context context) {
-    this.context = context;
 
     String directory = context.getString("sink.directory");
     String rollInterval = context.getString("sink.rollInterval");
 
     serializerType = context.getString("sink.serializer", "TEXT");
     serializerContext =
-        new Context(context.getSubProperties(EventSerializer.CTX_PREFIX));
+        new Context(context.getSubProperties("sink." +
+            EventSerializer.CTX_PREFIX));
 
     Preconditions.checkArgument(directory != null, "Directory may not be null");
     Preconditions.checkNotNull(serializerType, "Serializer type is undefined");
@@ -90,12 +90,19 @@ public class RollingFileSink extends AbstractSink implements Configurable {
       this.rollInterval = Long.parseLong(rollInterval);
     }
 
+    batchSize = context.getInteger("sink.batchSize", defaultBatchSize);
+
     this.directory = new File(directory);
+
+    if (sinkCounter == null) {
+      sinkCounter = new SinkCounter(getName());
+    }
   }
 
   @Override
   public void start() {
-
+    logger.info("Starting {}...", this);
+    sinkCounter.start();
     super.start();
 
     pathController.setBaseDirectory(directory);
@@ -126,6 +133,7 @@ public class RollingFileSink extends AbstractSink implements Configurable {
     } else{
       logger.info("RollInterval is not valid, file rolling will not happen.");
     }
+    logger.info("RollingFileSink {} started.", getName());
   }
 
   @Override
@@ -139,16 +147,17 @@ public class RollingFileSink extends AbstractSink implements Configurable {
         try {
           serializer.flush();
           serializer.beforeClose();
-          outputStream.flush();
           outputStream.close();
+          sinkCounter.incrementConnectionClosedCount();
           shouldRotate = false;
         } catch (IOException e) {
+          sinkCounter.incrementConnectionFailedCount();
           throw new EventDeliveryException("Unable to rotate file "
               + pathController.getCurrentFile() + " while delivering event", e);
+        } finally {
+          serializer = null;
+          outputStream = null;
         }
-
-        serializer = null;
-        outputStream = null;
         pathController.rotate();
       }
     }
@@ -162,7 +171,9 @@ public class RollingFileSink extends AbstractSink implements Configurable {
         serializer = EventSerializerFactory.getInstance(
             serializerType, serializerContext, outputStream);
         serializer.afterCreate();
+        sinkCounter.incrementConnectionCreatedCount();
       } catch (IOException e) {
+        sinkCounter.incrementConnectionFailedCount();
         throw new EventDeliveryException("Failed to open file "
             + pathController.getCurrentFile() + " while delivering event", e);
       }
@@ -175,30 +186,36 @@ public class RollingFileSink extends AbstractSink implements Configurable {
 
     try {
       transaction.begin();
-      event = channel.take();
+      int eventAttemptCounter = 0;
+      for (int i = 0; i < batchSize; i++) {
+        event = channel.take();
+        if (event != null) {
+          sinkCounter.incrementEventDrainAttemptCount();
+          eventAttemptCounter++;
+          serializer.write(event);
 
-      if (event != null) {
-        serializer.write(event);
+          /*
+           * FIXME: Feature: Rotate on size and time by checking bytes written and
+           * setting shouldRotate = true if we're past a threshold.
+           */
 
-        /*
-         * FIXME: Feature: Rotate on size and time by checking bytes written and
-         * setting shouldRotate = true if we're past a threshold.
-         */
-
-        /*
-         * FIXME: Feature: Control flush interval based on time or number of
-         * events. For now, we're super-conservative and flush on each write.
-         */
-        serializer.flush();
-        outputStream.flush();
-      } else {
-        // No events found, request back-off semantics from runner
-        result = Status.BACKOFF;
+          /*
+           * FIXME: Feature: Control flush interval based on time or number of
+           * events. For now, we're super-conservative and flush on each write.
+           */
+        } else {
+          // No events found, request back-off semantics from runner
+          result = Status.BACKOFF;
+          break;
+        }
       }
+      serializer.flush();
+      outputStream.flush();
       transaction.commit();
+      sinkCounter.addToEventDrainSuccessCount(eventAttemptCounter);
     } catch (Exception ex) {
       transaction.rollback();
-      throw new EventDeliveryException("Failed to process event: " + event, ex);
+      throw new EventDeliveryException("Failed to process transaction", ex);
     } finally {
       transaction.close();
     }
@@ -208,7 +225,8 @@ public class RollingFileSink extends AbstractSink implements Configurable {
 
   @Override
   public void stop() {
-
+    logger.info("RollingFile sink {} stopping...", getName());
+    sinkCounter.stop();
     super.stop();
 
     if (outputStream != null) {
@@ -217,10 +235,14 @@ public class RollingFileSink extends AbstractSink implements Configurable {
       try {
         serializer.flush();
         serializer.beforeClose();
-        outputStream.flush();
         outputStream.close();
+        sinkCounter.incrementConnectionClosedCount();
       } catch (IOException e) {
+        sinkCounter.incrementConnectionFailedCount();
         logger.error("Unable to close output stream. Exception follows.", e);
+      } finally {
+        outputStream = null;
+        serializer = null;
       }
     }
     if(rollInterval > 0){
@@ -237,6 +259,8 @@ public class RollingFileSink extends AbstractSink implements Configurable {
         }
       }
     }
+    logger.info("RollingFile sink {} stopped. Event metrics: {}",
+        getName(), sinkCounter);
   }
 
   public File getDirectory() {

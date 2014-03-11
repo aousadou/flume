@@ -33,10 +33,14 @@ public abstract class AbstractSinkSelector implements SinkSelector {
   // List of sinks as specified
   private List<Sink> sinkList;
 
+  protected long maxTimeOut = 0;
+
   @Override
   public void configure(Context context) {
-    // no-op configure method for convenience for implementations
-    // that do not require configuration.
+    Long timeOut = context.getLong("maxTimeOut");
+    if(timeOut != null){
+      maxTimeOut = timeOut;
+    }
   }
 
   @Override
@@ -62,5 +66,10 @@ public abstract class AbstractSinkSelector implements SinkSelector {
 
   protected List<Sink> getSinks() {
     return sinkList;
+  }
+
+  @Override
+  public void informSinkFailed(Sink failedSink) {
+    // no-op
   }
 }

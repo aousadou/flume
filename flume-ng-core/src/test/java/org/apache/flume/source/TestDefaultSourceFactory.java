@@ -19,10 +19,9 @@
 
 package org.apache.flume.source;
 
-import java.util.Map;
-
 import org.apache.flume.Source;
 import org.apache.flume.SourceFactory;
+import org.apache.flume.source.http.HTTPSource;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
@@ -51,8 +50,8 @@ public class TestDefaultSourceFactory {
     Source s1 = sourceFactory.create("avroSource1", "avro");
     Source s2 = sourceFactory.create("avroSource2", "avro");
 
-    Assert.assertSame(avroSource1, s1);
-    Assert.assertSame(avroSource2, s2);
+    Assert.assertNotSame(avroSource1, s1);
+    Assert.assertNotSame(avroSource2, s2);
 
   }
 
@@ -69,24 +68,16 @@ public class TestDefaultSourceFactory {
     verifySourceCreation("netcat-src", "netcat", NetcatSource.class);
     verifySourceCreation("exec-src", "exec", ExecSource.class);
     verifySourceCreation("avro-src", "avro", AvroSource.class);
+    verifySourceCreation("syslogtcp-src", "syslogtcp", SyslogTcpSource.class);
+    verifySourceCreation("multiport_syslogtcp-src", "multiport_syslogtcp",
+        MultiportSyslogTCPSource.class);
+    verifySourceCreation("syslogudp-src", "syslogudp", SyslogUDPSource.class);
+    verifySourceCreation("spooldir-src", "spooldir",
+        SpoolDirectorySource.class);
+    verifySourceCreation("http-src", "http", HTTPSource.class);
+    verifySourceCreation("thrift-src", "thrift", ThriftSource.class);
     verifySourceCreation("custom-src", MockSource.class.getCanonicalName(),
         MockSource.class);
   }
 
-  @Test
-  public void testSourceRegistry() throws Exception {
-    Source s1 = sourceFactory.create("s1", "avro");
-    Map<Class<?>, Map<String, Source>> sr =
-        ((DefaultSourceFactory) sourceFactory).getRegistryClone();
-
-    Assert.assertEquals(1, sr.size());
-
-    Map<String, Source> srMap = sr.get(AvroSource.class);
-    Assert.assertNotNull(srMap);
-    Assert.assertEquals(1, srMap.size());
-
-    Source src = srMap.get("s1");
-    Assert.assertNotNull(src);
-    Assert.assertSame(s1, src);
-  }
 }

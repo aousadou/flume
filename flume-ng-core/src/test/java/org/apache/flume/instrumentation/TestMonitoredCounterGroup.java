@@ -103,6 +103,7 @@ public class TestMonitoredCounterGroup {
     String name = getRandomName();
 
     SinkCounter skc = new SinkCounter(name);
+    skc.register();
     ObjectName on = new ObjectName(SINK_OBJ_NAME_PREFIX + name);
     assertSkCounterState(on, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L);
 
@@ -157,6 +158,9 @@ public class TestMonitoredCounterGroup {
     assertSkCounterState(on, connCreated, connClosed, connFailed, batchEmpty,
         batchUnderflow, batchComplete, eventDrainAttempt, eventDrainSuccess);
 
+    // give start time a chance to increment
+    Thread.sleep(5L);
+
     skc.start();
     Assert.assertTrue("StartTime", getStartTime(on) != 0L);
     Assert.assertTrue("StartTime", getStartTime(on) > start1);
@@ -179,6 +183,7 @@ public class TestMonitoredCounterGroup {
     String name = getRandomName();
 
     ChannelCounter chc = new ChannelCounter(name);
+    chc.register();
     ObjectName on = new ObjectName(CHANNEL_OBJ_NAME_PREFIX + name);
     assertChCounterState(on, 0L, 0L, 0L, 0L, 0L);
 
@@ -219,6 +224,9 @@ public class TestMonitoredCounterGroup {
     assertChCounterState(on, numChannelSize, numEventPutAttempt,
         numEventTakeAttempt, numEventPutSuccess, numEventTakeSuccess);
 
+    // give start time a chance to increment
+    Thread.sleep(5L);
+
     chc.start();
     Assert.assertTrue("StartTime", getStartTime(on) != 0L);
     Assert.assertTrue("StartTime", getStartTime(on) > start1);
@@ -232,6 +240,7 @@ public class TestMonitoredCounterGroup {
     String name = getRandomName();
 
     SourceCounter srcc = new SourceCounter(name);
+    srcc.register();
     ObjectName on = new ObjectName(SOURCE_OBJ_NAME_PREFIX + name);
 
     assertSrcCounterState(on, 0L, 0L, 0L, 0L, 0L, 0L);
@@ -280,6 +289,9 @@ public class TestMonitoredCounterGroup {
         numAppendReceived, numAppendAccepted, numAppendBatchReceived,
         numAppendBatchAccepted);
 
+    // give start time a chance to increment
+    Thread.sleep(5L);
+
     srcc.start();
     Assert.assertTrue("StartTime", getStartTime(on) != 0L);
     Assert.assertTrue("StartTime", getStartTime(on) > start1);
@@ -300,6 +312,28 @@ public class TestMonitoredCounterGroup {
 
     assertSrcCounterState(on, numEventReceived2, numEventAccepted2,
         0L, 0L, 0L, 0L);
+  }
+
+  @Test
+  public void testRegisterTwice() throws Exception {
+    String name = "re-register-" + getRandomName();
+
+    SourceCounter c1 = new SourceCounter(name);
+    c1.register();
+    ObjectName on = new ObjectName(SOURCE_OBJ_NAME_PREFIX + name);
+
+    Assert.assertEquals("StartTime", 0L, getStartTime(on));
+    Assert.assertEquals("StopTime", 0L, getStopTime(on));
+    c1.start();
+    c1.stop();
+    Assert.assertTrue("StartTime", getStartTime(on) > 0L);
+    Assert.assertTrue("StopTime", getStopTime(on) > 0L);
+
+    SourceCounter c2 = new SourceCounter(name);
+    c2.register();
+
+    Assert.assertEquals("StartTime", 0L, getStartTime(on));
+    Assert.assertEquals("StopTime", 0L, getStopTime(on));
   }
 
   private void assertSrcCounterState(ObjectName on, long eventReceivedCount,

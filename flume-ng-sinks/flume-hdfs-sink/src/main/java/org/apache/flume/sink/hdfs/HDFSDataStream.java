@@ -23,33 +23,53 @@ import org.apache.flume.Context;
 import org.apache.flume.Event;
 import org.apache.flume.serialization.EventSerializer;
 import org.apache.flume.serialization.EventSerializerFactory;
-import org.apache.flume.sink.FlumeFormatter;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FSDataOutputStream;
 import org.apache.hadoop.fs.FileSystem;
+import org.apache.hadoop.fs.LocalFileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.io.SequenceFile.CompressionType;
 import org.apache.hadoop.io.compress.CompressionCodec;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-public class HDFSDataStream implements HDFSWriter {
+public class HDFSDataStream extends AbstractHDFSWriter {
+
+  private static final Logger logger =
+      LoggerFactory.getLogger(HDFSDataStream.class);
+
   private FSDataOutputStream outStream;
-
   private String serializerType;
   private Context serializerContext;
   private EventSerializer serializer;
+  private boolean useRawLocalFileSystem;
 
   @Override
   public void configure(Context context) {
+    super.configure(context);
+
     serializerType = context.getString("serializer", "TEXT");
+    useRawLocalFileSystem = context.getBoolean("hdfs.useRawLocalFileSystem",
+        false);
     serializerContext =
         new Context(context.getSubProperties(EventSerializer.CTX_PREFIX));
+    logger.info("Serializer = " + serializerType + ", UseRawLocalFileSystem = "
+        + useRawLocalFileSystem);
   }
 
   @Override
-  public void open(String filePath, FlumeFormatter fmt) throws IOException {
+  public void open(String filePath) throws IOException {
     Configuration conf = new Configuration();
     Path dstPath = new Path(filePath);
     FileSystem hdfs = dstPath.getFileSystem(conf);
+    if(useRawLocalFileSystem) {
+      if(hdfs instanceof LocalFileSystem) {
+        hdfs = ((LocalFileSystem)hdfs).getRaw();
+      } else {
+        logger.warn("useRawLocalFileSystem is set to true but file system " +
+            "is not of type LocalFileSystem: " + hdfs.getClass().getName());
+      }
+    }
 
     boolean appending = false;
     if (conf.getBoolean("hdfs.append.support", false) == true && hdfs.isFile
@@ -69,6 +89,9 @@ public class HDFSDataStream implements HDFSWriter {
           ") does not support append");
     }
 
+    // must call superclass to check for replication issues
+    registerCurrentStream(outStream, hdfs, dstPath);
+
     if (appending) {
       serializer.afterReopen();
     } else {
@@ -78,13 +101,12 @@ public class HDFSDataStream implements HDFSWriter {
 
   @Override
   public void open(String filePath, CompressionCodec codec,
-      CompressionType cType, FlumeFormatter fmt) throws IOException {
-    open(filePath, fmt);
+                   CompressionType cType) throws IOException {
+    open(filePath);
   }
 
   @Override
-  public void append(Event e, FlumeFormatter fmt) throws IOException {
-    // shun flumeformatter...
+  public void append(Event e) throws IOException {
     serializer.write(e);
   }
 
@@ -101,7 +123,9 @@ public class HDFSDataStream implements HDFSWriter {
     serializer.beforeClose();
     outStream.flush();
     outStream.sync();
-    outStream.close();
+    closeHDFSOutputStream(outStream);
+
+    unregisterCurrentStream();
   }
 
 }

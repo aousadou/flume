@@ -22,10 +22,14 @@ import java.io.File;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
+import java.util.regex.Pattern;
 
 import com.google.common.collect.Lists;
 
 public class LogUtils {
+
+  private static final Pattern pattern =
+          Pattern.compile("^" + Log.PREFIX + "\\d+$");
 
   /**
    * Sort a list of files by the number after Log.PREFIX.
@@ -59,13 +63,20 @@ public class LogUtils {
    */
   static List<File> getLogs(File logDir) {
     List<File> result = Lists.newArrayList();
-    for (File file : logDir.listFiles()) {
+    File[] files = logDir.listFiles();
+    if(files == null) {
+      String msg = logDir + ".listFiles() returned null: ";
+      msg += "File = " + logDir.isFile() + ", ";
+      msg += "Exists = " + logDir.exists() + ", ";
+      msg += "Writable = " + logDir.canWrite();
+      throw new IllegalStateException(msg);
+    }
+    for (File file : files) {
       String name = file.getName();
-      if (name.startsWith(Log.PREFIX)) {
+      if (pattern.matcher(name).matches()) {
         result.add(file);
       }
     }
     return result;
   }
-
 }

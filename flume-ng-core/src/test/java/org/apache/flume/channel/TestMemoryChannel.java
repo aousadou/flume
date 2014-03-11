@@ -21,6 +21,7 @@ package org.apache.flume.channel;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.LinkedBlockingDeque;
 
 import org.apache.flume.Channel;
 import org.apache.flume.ChannelException;
@@ -33,6 +34,8 @@ import org.apache.flume.event.EventBuilder;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
+import static org.fest.reflect.core.Reflection.*;
+
 
 public class TestMemoryChannel {
 
@@ -176,7 +179,7 @@ public class TestMemoryChannel {
   }
 
   @Test
-  public void testBufferEmptyingAfterTakeCommit() {
+  public void testCapacityBufferEmptyingAfterTakeCommit() {
     Context context = new Context();
     Map<String, String> parms = new HashMap<String, String>();
     parms.put("capacity", "3");
@@ -208,7 +211,7 @@ public class TestMemoryChannel {
   }
 
   @Test
-  public void testBufferEmptyingAfterRollback() {
+  public void testCapacityBufferEmptyingAfterRollback() {
     Context context = new Context();
     Map<String, String> parms = new HashMap<String, String>();
     parms.put("capacity", "3");
@@ -231,5 +234,268 @@ public class TestMemoryChannel {
     channel.put(EventBuilder.withBody("test".getBytes()));
     tx.commit();
     tx.close();
+  }
+
+  @Test(expected=ChannelException.class)
+  public void testByteCapacityOverload() {
+    Context context = new Context();
+    Map<String, String> parms = new HashMap<String, String>();
+    parms.put("byteCapacity", "2000");
+    parms.put("byteCapacityBufferPercentage", "20");
+    context.putAll(parms);
+    Configurables.configure(channel,  context);
+
+    byte[] eventBody = new byte[405];
+
+    Transaction transaction = channel.getTransaction();
+    transaction.begin();
+    channel.put(EventBuilder.withBody(eventBody));
+    channel.put(EventBuilder.withBody(eventBody));
+    channel.put(EventBuilder.withBody(eventBody));
+    transaction.commit();
+    transaction.close();
+
+    transaction = channel.getTransaction();
+    transaction.begin();
+    channel.put(EventBuilder.withBody(eventBody));
+    channel.put(EventBuilder.withBody(eventBody));
+    // this should kill  it
+    transaction.commit();
+    Assert.fail();
+
+  }
+
+  public void testByteCapacityBufferEmptyingAfterTakeCommit() {
+    Context context = new Context();
+    Map<String, String> parms = new HashMap<String, String>();
+    parms.put("byteCapacity", "2000");
+    parms.put("byteCapacityBufferPercentage", "20");
+    context.putAll(parms);
+    Configurables.configure(channel,  context);
+
+    byte[] eventBody = new byte[405];
+
+    Transaction tx = channel.getTransaction();
+    tx.begin();
+    channel.put(EventBuilder.withBody(eventBody));
+    channel.put(EventBuilder.withBody(eventBody));
+    channel.put(EventBuilder.withBody(eventBody));
+    channel.put(EventBuilder.withBody(eventBody));
+    try {
+      channel.put(EventBuilder.withBody(eventBody));
+      throw new RuntimeException("Put was able to overflow byte capacity.");
+    } catch (ChannelException ce)
+    {
+      //Do nothing
+    }
+
+    tx.commit();
+    tx.close();
+
+    tx = channel.getTransaction();
+    tx.begin();
+    channel.take();
+    channel.take();
+    tx.commit();
+    tx.close();
+
+    tx = channel.getTransaction();
+    tx.begin();
+    channel.put(EventBuilder.withBody(eventBody));
+    channel.put(EventBuilder.withBody(eventBody));
+    try {
+      channel.put(EventBuilder.withBody(eventBody));
+      throw new RuntimeException("Put was able to overflow byte capacity.");
+    } catch (ChannelException ce)
+    {
+      //Do nothing
+    }
+    tx.commit();
+    tx.close();
+  }
+
+  @Test
+  public void testByteCapacityBufferEmptyingAfterRollback() {
+    Context context = new Context();
+    Map<String, String> parms = new HashMap<String, String>();
+    parms.put("byteCapacity", "2000");
+    parms.put("byteCapacityBufferPercentage", "20");
+    context.putAll(parms);
+    Configurables.configure(channel,  context);
+
+    byte[] eventBody = new byte[405];
+
+    Transaction tx = channel.getTransaction();
+    tx.begin();
+    channel.put(EventBuilder.withBody(eventBody));
+    channel.put(EventBuilder.withBody(eventBody));
+    channel.put(EventBuilder.withBody(eventBody));
+    tx.rollback();
+    tx.close();
+
+    tx = channel.getTransaction();
+    tx.begin();
+    channel.put(EventBuilder.withBody(eventBody));
+    channel.put(EventBuilder.withBody(eventBody));
+    channel.put(EventBuilder.withBody(eventBody));
+    tx.commit();
+    tx.close();
+  }
+
+  @Test
+  public void testByteCapacityBufferChangeConfig() {
+    Context context = new Context();
+    Map<String, String> parms = new HashMap<String, String>();
+    parms.put("byteCapacity", "2000");
+    parms.put("byteCapacityBufferPercentage", "20");
+    context.putAll(parms);
+    Configurables.configure(channel,  context);
+
+    byte[] eventBody = new byte[405];
+
+    Transaction tx = channel.getTransaction();
+    tx.begin();
+    channel.put(EventBuilder.withBody(eventBody));
+    tx.commit();
+    tx.close();
+    channel.stop();
+    parms.put("byteCapacity", "1500");
+    context.putAll(parms);
+    Configurables.configure(channel,  context);
+    channel.start();
+    tx = channel.getTransaction();
+    tx.begin();
+    channel.put(EventBuilder.withBody(eventBody));
+    try {
+      channel.put(EventBuilder.withBody(eventBody));
+      tx.commit();
+      Assert.fail();
+    } catch ( ChannelException e ) {
+      //success
+      tx.rollback();
+    } finally {
+      tx.close();
+    }
+
+    channel.stop();
+    parms.put("byteCapacity", "250");
+    parms.put("byteCapacityBufferPercentage", "20");
+    context.putAll(parms);
+    Configurables.configure(channel,  context);
+    channel.start();
+    tx = channel.getTransaction();
+    tx.begin();
+    channel.put(EventBuilder.withBody(eventBody));
+    tx.commit();
+    tx.close();
+    channel.stop();
+
+    parms.put("byteCapacity", "300");
+    context.putAll(parms);
+    Configurables.configure(channel,  context);
+    channel.start();
+    tx = channel.getTransaction();
+    tx.begin();
+    try {
+      for(int i = 0; i < 2; i++) {
+        channel.put(EventBuilder.withBody(eventBody));
+      }
+      tx.commit();
+      Assert.fail();
+    } catch ( ChannelException e ) {
+      //success
+      tx.rollback();
+    } finally {
+      tx.close();
+    }
+
+    channel.stop();
+    parms.put("byteCapacity", "3300");
+    context.putAll(parms);
+    Configurables.configure(channel,  context);
+    channel.start();
+    tx = channel.getTransaction();
+    tx.begin();
+
+    try {
+      for(int i = 0; i < 15; i++) {
+        channel.put(EventBuilder.withBody(eventBody));
+      }
+      tx.commit();
+      Assert.fail();
+    } catch ( ChannelException e ) {
+      //success
+      tx.rollback();
+    } finally {
+      tx.close();
+    }
+    channel.stop();
+    parms.put("byteCapacity", "4000");
+    context.putAll(parms);
+    Configurables.configure(channel,  context);
+    channel.start();
+    tx = channel.getTransaction();
+    tx.begin();
+
+    try {
+      for(int i = 0; i < 25; i++) {
+        channel.put(EventBuilder.withBody(eventBody));
+      }
+      tx.commit();
+      Assert.fail();
+    } catch ( ChannelException e ) {
+      //success
+      tx.rollback();
+    } finally {
+      tx.close();
+    }
+    channel.stop();
+  }
+
+  /*
+   * This would cause a NPE without FLUME-1622.
+   */
+  @Test
+  public void testNullEmptyEvent() {
+    Context context = new Context();
+    Map<String, String> parms = new HashMap<String, String>();
+    parms.put("byteCapacity", "2000");
+    parms.put("byteCapacityBufferPercentage", "20");
+    context.putAll(parms);
+    Configurables.configure(channel,  context);
+
+    Transaction tx = channel.getTransaction();
+    tx.begin();
+    //This line would cause a NPE without FLUME-1622.
+    channel.put(EventBuilder.withBody(null));
+    tx.commit();
+    tx.close();
+
+    tx = channel.getTransaction();
+    tx.begin();
+    channel.put(EventBuilder.withBody(new byte[0]));
+    tx.commit();
+    tx.close();
+
+
+  }
+
+  @Test
+  public void testNegativeCapacities() {
+    Context context = new Context();
+    Map<String, String> parms = new HashMap<String, String>();
+    parms.put("capacity", "-3");
+    parms.put("transactionCapacity", "-1");
+    context.putAll(parms);
+    Configurables.configure(channel, context);
+
+    Assert.assertTrue(field("queue")
+            .ofType(LinkedBlockingDeque.class)
+            .in(channel).get()
+            .remainingCapacity() > 0);
+
+    Assert.assertTrue(field("transCapacity")
+            .ofType(Integer.class)
+            .in(channel).get() > 0);
   }
 }

@@ -24,28 +24,27 @@ import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.TimeZone;
 import java.util.Map.Entry;
-import java.util.concurrent.Callable;
-import java.util.concurrent.CancellationException;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
 
+import com.google.common.annotations.VisibleForTesting;
 import org.apache.flume.Channel;
+import org.apache.flume.Clock;
 import org.apache.flume.Context;
 import org.apache.flume.Event;
 import org.apache.flume.EventDeliveryException;
+import org.apache.flume.SystemClock;
 import org.apache.flume.Transaction;
 import org.apache.flume.conf.Configurable;
 import org.apache.flume.formatter.output.BucketPath;
 import org.apache.flume.instrumentation.SinkCounter;
 import org.apache.flume.sink.AbstractSink;
-import org.apache.flume.sink.FlumeFormatter;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.io.SequenceFile.CompressionType;
 import org.apache.hadoop.io.compress.CompressionCodec;
@@ -61,17 +60,26 @@ import com.google.common.collect.Lists;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
 
 public class HDFSEventSink extends AbstractSink implements Configurable {
+  public interface WriterCallback {
+    public void run(String filePath);
+  }
+
   private static final Logger LOG = LoggerFactory
       .getLogger(HDFSEventSink.class);
+
+  private static String DIRECTORY_DELIMITER = System.getProperty("file.separator");
 
   private static final long defaultRollInterval = 30;
   private static final long defaultRollSize = 1024;
   private static final long defaultRollCount = 10;
   private static final String defaultFileName = "FlumeData";
-  private static final long defaultBatchSize = 1;
-  private static final long defaultTxnEventMax = 100;
+  private static final String defaultSuffix = "";
+  private static final String defaultInUsePrefix = "";
+  private static final String defaultInUseSuffix = ".tmp";
+  private static final long defaultBatchSize = 100;
   private static final String defaultFileType = HDFSWriterFactory.SequenceFileType;
   private static final int defaultMaxOpenFiles = 5000;
+
   /**
    * Default length of time we wait for blocking BucketWriter calls
    * before timing out the operation. Intended to prevent server hangs.
@@ -100,16 +108,19 @@ public class HDFSEventSink extends AbstractSink implements Configurable {
   private long rollInterval;
   private long rollSize;
   private long rollCount;
-  private long txnEventMax;
   private long batchSize;
   private int threadsPoolSize;
   private int rollTimerPoolSize;
   private CompressionCodec codeC;
   private CompressionType compType;
   private String fileType;
-  private String path;
+  private String filePath;
+  private String fileName;
+  private String suffix;
+  private String inUsePrefix;
+  private String inUseSuffix;
+  private TimeZone timeZone;
   private int maxOpenFiles;
-  private String writeFormat;
   private ExecutorService callTimeoutPool;
   private ScheduledExecutorService timedRollerPool;
 
@@ -121,10 +132,15 @@ public class HDFSEventSink extends AbstractSink implements Configurable {
   private boolean needRounding = false;
   private int roundUnit = Calendar.SECOND;
   private int roundValue = 1;
+  private boolean useLocalTime = false;
 
   private long callTimeout;
   private Context context;
   private SinkCounter sinkCounter;
+
+  private volatile int idleTimeout;
+  private Clock clock;
+  private final Object sfWritersLock = new Object();
 
   /*
    * Extended Java LinkedHashMap for open file handle LRU queue.
@@ -168,24 +184,32 @@ public class HDFSEventSink extends AbstractSink implements Configurable {
     this.writerFactory = writerFactory;
   }
 
-    // read configuration and setup thresholds
+  @VisibleForTesting
+  Map<String, BucketWriter> getSfWriters() {
+    return sfWriters;
+  }
+
+  // read configuration and setup thresholds
   @Override
   public void configure(Context context) {
     this.context = context;
 
-    String dirpath = Preconditions.checkNotNull(
+    filePath = Preconditions.checkNotNull(
         context.getString("hdfs.path"), "hdfs.path is required");
-    String fileName = context.getString("hdfs.filePrefix", defaultFileName);
-    this.path = dirpath + System.getProperty("file.separator") + fileName;
+    fileName = context.getString("hdfs.filePrefix", defaultFileName);
+    this.suffix = context.getString("hdfs.fileSuffix", defaultSuffix);
+    inUsePrefix = context.getString("hdfs.inUsePrefix", defaultInUsePrefix);
+    inUseSuffix = context.getString("hdfs.inUseSuffix", defaultInUseSuffix);
+    String tzName = context.getString("hdfs.timeZone");
+    timeZone = tzName == null ? null : TimeZone.getTimeZone(tzName);
     rollInterval = context.getLong("hdfs.rollInterval", defaultRollInterval);
     rollSize = context.getLong("hdfs.rollSize", defaultRollSize);
     rollCount = context.getLong("hdfs.rollCount", defaultRollCount);
     batchSize = context.getLong("hdfs.batchSize", defaultBatchSize);
-    txnEventMax = context.getLong("hdfs.txnEventMax", defaultTxnEventMax);
+    idleTimeout = context.getInteger("hdfs.idleTimeout", 0);
     String codecName = context.getString("hdfs.codeC");
     fileType = context.getString("hdfs.fileType", defaultFileType);
     maxOpenFiles = context.getInteger("hdfs.maxOpenFiles", defaultMaxOpenFiles);
-    writeFormat = context.getString("hdfs.writeFormat");
     callTimeout = context.getLong("hdfs.callTimeout", defaultCallTimeout);
     threadsPoolSize = context.getInteger("hdfs.threadsPoolSize",
         defaultThreadPoolSize);
@@ -197,8 +221,6 @@ public class HDFSEventSink extends AbstractSink implements Configurable {
 
     Preconditions.checkArgument(batchSize > 0,
         "batchSize must be greater than 0");
-    Preconditions.checkArgument(txnEventMax > 0,
-        "txnEventMax must be greater than 0");
     if (codecName == null) {
       codeC = null;
       compType = CompressionType.NONE;
@@ -222,19 +244,7 @@ public class HDFSEventSink extends AbstractSink implements Configurable {
           + " when fileType is: " + fileType);
     }
 
-    if (writeFormat == null) {
-      // Default write formatter is chosen by requested file type
-      if(fileType.equalsIgnoreCase(HDFSWriterFactory.DataStreamType)
-         || fileType.equalsIgnoreCase(HDFSWriterFactory.CompStreamType)) {
-        // Output is written into text files, by default separate events by \n
-        this.writeFormat = HDFSFormatterFactory.hdfsTextFormat;
-      } else {
-        // Output is written into binary files, so use binary writable format
-        this.writeFormat = HDFSFormatterFactory.hdfsWritableFormat;
-      }
-    }
-
-    if (!authenticate(path)) {
+    if (!authenticate()) {
       LOG.error("Failed to authenticate!");
     }
     needRounding = context.getBoolean("hdfs.round", false);
@@ -264,6 +274,11 @@ public class HDFSEventSink extends AbstractSink implements Configurable {
       }
     }
 
+    this.useLocalTime = context.getBoolean("hdfs.useLocalTimeStamp", false);
+    if(useLocalTime) {
+      clock = new SystemClock();
+    }
+
     if (sinkCounter == null) {
       sinkCounter = new SinkCounter(getName());
     }
@@ -286,7 +301,8 @@ public class HDFSEventSink extends AbstractSink implements Configurable {
     return false;
   }
 
-  private static CompressionCodec getCodec(String codecName) {
+  @VisibleForTesting
+  static CompressionCodec getCodec(String codecName) {
     Configuration conf = new Configuration();
     List<Class<? extends CompressionCodec>> codecs = CompressionCodecFactory
         .getCodecClasses(conf);
@@ -322,85 +338,57 @@ public class HDFSEventSink extends AbstractSink implements Configurable {
     return codec;
   }
 
+
   /**
-   * Execute the callable on a separate thread and wait for the completion
-   * for the specified amount of time in milliseconds. In case of timeout
-   * cancel the callable and throw an IOException
+   * Pull events out of channel and send it to HDFS. Take at most batchSize
+   * events per Transaction. Find the corresponding bucket for the event.
+   * Ensure the file is open. Serialize the data and write it to the file on
+   * HDFS. <br/>
+   * This method is not thread safe.
    */
-  private <T> T callWithTimeout(Callable<T> callable)
-      throws IOException, InterruptedException {
-    Future<T> future = callTimeoutPool.submit(callable);
-    try {
-      if (callTimeout > 0) {
-        return future.get(callTimeout, TimeUnit.MILLISECONDS);
-      } else {
-        return future.get();
-      }
-    } catch (TimeoutException eT) {
-      future.cancel(true);
-      sinkCounter.incrementConnectionFailedCount();
-      throw new IOException("Callable timed out after " + callTimeout + " ms",
-          eT);
-    } catch (ExecutionException e1) {
-      sinkCounter.incrementConnectionFailedCount();
-      Throwable cause = e1.getCause();
-      if (cause instanceof IOException) {
-        throw (IOException) cause;
-      } else if (cause instanceof InterruptedException) {
-        throw (InterruptedException) cause;
-      } else if (cause instanceof RuntimeException) {
-        throw (RuntimeException) cause;
-      } else if (cause instanceof Error) {
-        throw (Error)cause;
-      } else {
-        throw new RuntimeException(e1);
-      }
-    } catch (CancellationException ce) {
-      throw new InterruptedException(
-          "Blocked callable interrupted by rotation event");
-    } catch (InterruptedException ex) {
-      LOG.warn("Unexpected Exception " + ex.getMessage(), ex);
-      throw ex;
-    }
-  }
-  /**
-   * Pull events out of channel and send it to HDFS - take at the most
-   * txnEventMax, that's the maximum #events to hold in channel for a given
-   * transaction - find the corresponding bucket for the event, ensure the file
-   * is open - extract the pay-load and append to HDFS file <br />
-   * WARNING: NOT THREAD SAFE
-   */
-  @Override
   public Status process() throws EventDeliveryException {
     Channel channel = getChannel();
     Transaction transaction = channel.getTransaction();
     List<BucketWriter> writers = Lists.newArrayList();
     transaction.begin();
     try {
-      Event event = null;
       int txnEventCount = 0;
-      for (txnEventCount = 0; txnEventCount < txnEventMax; txnEventCount++) {
-        event = channel.take();
+      for (txnEventCount = 0; txnEventCount < batchSize; txnEventCount++) {
+        Event event = channel.take();
         if (event == null) {
           break;
         }
 
         // reconstruct the path name by substituting place holders
-        String realPath = BucketPath.escapeString(path, event.getHeaders(),
-            needRounding, roundUnit, roundValue);
-        BucketWriter bucketWriter = sfWriters.get(realPath);
+        String realPath = BucketPath.escapeString(filePath, event.getHeaders(),
+            timeZone, needRounding, roundUnit, roundValue, useLocalTime);
+        String realName = BucketPath.escapeString(fileName, event.getHeaders(),
+          timeZone, needRounding, roundUnit, roundValue, useLocalTime);
 
-        // we haven't seen this file yet, so open it and cache the handle
-        if (bucketWriter == null) {
-          HDFSWriter hdfsWriter = writerFactory.getWriter(fileType);
-          FlumeFormatter formatter = HDFSFormatterFactory
-              .getFormatter(writeFormat);
-
-          bucketWriter = new BucketWriter(rollInterval, rollSize, rollCount,
-              batchSize, context, realPath, codeC, compType, hdfsWriter,
-              formatter, timedRollerPool, proxyTicket, sinkCounter);
-
-          sfWriters.put(realPath, bucketWriter);
+        String lookupPath = realPath + DIRECTORY_DELIMITER + realName;
+        BucketWriter bucketWriter;
+        HDFSWriter hdfsWriter = null;
+        // Callback to remove the reference to the bucket writer from the
+        // sfWriters map so that all buffers used by the HDFS file
+        // handles are garbage collected.
+        WriterCallback closeCallback = new WriterCallback() {
+          @Override
+          public void run(String bucketPath) {
+            LOG.info("Writer callback called.");
+            synchronized (sfWritersLock) {
+              sfWriters.remove(bucketPath);
+            }
+          }
+        };
+        synchronized (sfWritersLock) {
+          bucketWriter = sfWriters.get(lookupPath);
+          // we haven't seen this file yet, so open it and cache the handle
+          if (bucketWriter == null) {
+            hdfsWriter = writerFactory.getWriter(fileType);
+            bucketWriter = initializeBucketWriter(realPath, realName,
+              lookupPath, hdfsWriter, closeCallback);
+            sfWriters.put(lookupPath, bucketWriter);
+          }
         }
 
         // track the buckets getting written in this transaction
@@ -409,12 +397,24 @@ public class HDFSEventSink extends AbstractSink implements Configurable {
         }
 
         // Write the data to HDFS
-        append(bucketWriter, event);
+        try {
+          bucketWriter.append(event);
+        } catch (BucketClosedException ex) {
+          LOG.info("Bucket was closed while trying to append, " +
+            "reinitializing bucket and writing event.");
+          hdfsWriter = writerFactory.getWriter(fileType);
+          bucketWriter = initializeBucketWriter(realPath, realName,
+            lookupPath, hdfsWriter, closeCallback);
+          synchronized (sfWritersLock) {
+            sfWriters.put(lookupPath, bucketWriter);
+          }
+          bucketWriter.append(event);
+        }
       }
 
       if (txnEventCount == 0) {
         sinkCounter.incrementBatchEmptyCount();
-      } else if (txnEventCount == txnEventMax) {
+      } else if (txnEventCount == batchSize) {
         sinkCounter.incrementBatchCompleteCount();
       } else {
         sinkCounter.incrementBatchUnderflowCount();
@@ -422,21 +422,17 @@ public class HDFSEventSink extends AbstractSink implements Configurable {
 
       // flush all pending buckets before committing the transaction
       for (BucketWriter bucketWriter : writers) {
-        if (!bucketWriter.isBatchComplete()) {
-          flush(bucketWriter);
-        }
+        bucketWriter.flush();
       }
 
       transaction.commit();
 
-      if (txnEventCount > 0) {
-        sinkCounter.addToEventDrainSuccessCount(txnEventCount);
-      }
-
-      if(event == null) {
+      if (txnEventCount < 1) {
         return Status.BACKOFF;
+      } else {
+        sinkCounter.addToEventDrainSuccessCount(txnEventCount);
+        return Status.READY;
       }
-      return Status.READY;
     } catch (IOException eIO) {
       transaction.rollback();
       LOG.warn("HDFS IO error", eIO);
@@ -454,6 +450,16 @@ public class HDFSEventSink extends AbstractSink implements Configurable {
     }
   }
 
+  private BucketWriter initializeBucketWriter(String realPath,
+    String realName, String lookupPath, HDFSWriter hdfsWriter,
+    WriterCallback closeCallback) {
+    return new BucketWriter(rollInterval, rollSize, rollCount,
+      batchSize, context, realPath, realName, inUsePrefix, inUseSuffix,
+      suffix, codeC, compType, hdfsWriter, timedRollerPool,
+      proxyTicket, sinkCounter, idleTimeout, closeCallback,
+      lookupPath, callTimeout, callTimeoutPool);
+  }
+
   @Override
   public void stop() {
     // do not constrain close() calls with a timeout
@@ -461,10 +467,10 @@ public class HDFSEventSink extends AbstractSink implements Configurable {
       LOG.info("Closing {}", entry.getKey());
 
       try {
-        close(entry.getValue());
+        entry.getValue().close();
       } catch (Exception ex) {
         LOG.warn("Exception while closing " + entry.getKey() + ". " +
-            "Exception follows.", ex);
+                "Exception follows.", ex);
         if (ex instanceof InterruptedException) {
           Thread.currentThread().interrupt();
         }
@@ -472,13 +478,13 @@ public class HDFSEventSink extends AbstractSink implements Configurable {
     }
 
     // shut down all our thread pools
-    ExecutorService toShutdown[] = { callTimeoutPool, timedRollerPool };
+    ExecutorService toShutdown[] = {callTimeoutPool, timedRollerPool};
     for (ExecutorService execService : toShutdown) {
       execService.shutdown();
       try {
         while (execService.isTerminated() == false) {
           execService.awaitTermination(
-              Math.max(defaultCallTimeout, callTimeout), TimeUnit.MILLISECONDS);
+                  Math.max(defaultCallTimeout, callTimeout), TimeUnit.MILLISECONDS);
         }
       } catch (InterruptedException ex) {
         LOG.warn("shutdown interrupted on " + execService, ex);
@@ -498,18 +504,18 @@ public class HDFSEventSink extends AbstractSink implements Configurable {
   public void start() {
     String timeoutName = "hdfs-" + getName() + "-call-runner-%d";
     callTimeoutPool = Executors.newFixedThreadPool(threadsPoolSize,
-        new ThreadFactoryBuilder().setNameFormat(timeoutName).build());
+            new ThreadFactoryBuilder().setNameFormat(timeoutName).build());
 
     String rollerName = "hdfs-" + getName() + "-roll-timer-%d";
     timedRollerPool = Executors.newScheduledThreadPool(rollTimerPoolSize,
-        new ThreadFactoryBuilder().setNameFormat(rollerName).build());
+            new ThreadFactoryBuilder().setNameFormat(rollerName).build());
 
     this.sfWriters = new WriterLinkedHashMap(maxOpenFiles);
     sinkCounter.start();
     super.start();
   }
 
-  private boolean authenticate(String hdfsPath) {
+  private boolean authenticate() {
 
     // logic for kerberos login
     boolean useSecurity = UserGroupInformation.isSecurityEnabled();
@@ -521,12 +527,12 @@ public class HDFSEventSink extends AbstractSink implements Configurable {
       // sanity checking
       if (kerbConfPrincipal.isEmpty()) {
         LOG.error("Hadoop running in secure mode, but Flume config doesn't "
-            + "specify a principal to use for Kerberos auth.");
+                + "specify a principal to use for Kerberos auth.");
         return false;
       }
       if (kerbKeytab.isEmpty()) {
         LOG.error("Hadoop running in secure mode, but Flume config doesn't "
-            + "specify a keytab to use for Kerberos auth.");
+                + "specify a keytab to use for Kerberos auth.");
         return false;
       } else {
         //If keytab is specified, user should want it take effect.
@@ -534,8 +540,8 @@ public class HDFSEventSink extends AbstractSink implements Configurable {
         File kfile = new File(kerbKeytab);
         if (!(kfile.isFile() && kfile.canRead())) {
           throw new IllegalArgumentException("The keyTab file: "
-              + kerbKeytab + " is nonexistent or can't read. "
-              + "Please specify a readable keytab file for Kerberos auth.");
+                  + kerbKeytab + " is nonexistent or can't read. "
+                  + "Please specify a readable keytab file for Kerberos auth.");
         }
       }
 
@@ -546,7 +552,7 @@ public class HDFSEventSink extends AbstractSink implements Configurable {
         principal = SecurityUtil.getServerPrincipal(kerbConfPrincipal, "");
       } catch (IOException e) {
         LOG.error("Host lookup error resolving kerberos principal ("
-            + kerbConfPrincipal + "). Exception follows.", e);
+                + kerbConfPrincipal + "). Exception follows.", e);
         return false;
       }
 
@@ -561,9 +567,9 @@ public class HDFSEventSink extends AbstractSink implements Configurable {
       // since we don't have to be unnecessarily protective if they switch all
       // HDFS sinks to use a different principal all at once.
       Preconditions.checkState(prevUser == null || prevUser.equals(newUser),
-          "Cannot use multiple kerberos principals in the same agent. " +
-          " Must restart agent to use new principal or keytab. " +
-          "Previous = %s, New = %s", prevUser, newUser);
+              "Cannot use multiple kerberos principals in the same agent. " +
+                      " Must restart agent to use new principal or keytab. " +
+                      "Previous = %s, New = %s", prevUser, newUser);
 
       // attempt to use cached credential if the user is the same
       // this is polite and should avoid flooding the KDC with auth requests
@@ -573,7 +579,7 @@ public class HDFSEventSink extends AbstractSink implements Configurable {
           curUser = UserGroupInformation.getLoginUser();
         } catch (IOException e) {
           LOG.warn("User unexpectedly had no active login. Continuing with " +
-              "authentication", e);
+                  "authentication", e);
         }
       }
 
@@ -583,8 +589,8 @@ public class HDFSEventSink extends AbstractSink implements Configurable {
           kerberosLogin(this, principal, kerbKeytab);
         } catch (IOException e) {
           LOG.error("Authentication or file read error while attempting to "
-              + "login as kerberos principal (" + principal + ") using "
-              + "keytab (" + kerbKeytab + "). Exception follows.", e);
+                  + "login as kerberos principal (" + principal + ") using "
+                  + "keytab (" + kerbKeytab + "). Exception follows.", e);
           return false;
         }
       } else {
@@ -600,7 +606,7 @@ public class HDFSEventSink extends AbstractSink implements Configurable {
     if (!proxyUserName.isEmpty()) {
       try {
         proxyTicket = UserGroupInformation.createProxyUser(
-            proxyUserName, UserGroupInformation.getLoginUser());
+                proxyUserName, UserGroupInformation.getLoginUser());
       } catch (IOException e) {
         LOG.error("Unable to login as proxy user. Exception follows.", e);
         return false;
@@ -615,7 +621,7 @@ public class HDFSEventSink extends AbstractSink implements Configurable {
         ugi = UserGroupInformation.getLoginUser();
       } catch (IOException e) {
         LOG.error("Unexpected error: Unable to get authenticated user after " +
-            "apparent successful login! Exception follows.", e);
+                "apparent successful login! Exception follows.", e);
         return false;
       }
     }
@@ -635,7 +641,7 @@ public class HDFSEventSink extends AbstractSink implements Configurable {
           LOG.info(" Superuser using keytab: {}", superUser.isFromKeytab());
         } catch (IOException e) {
           LOG.error("Unexpected error: unknown superuser impersonating proxy.",
-              e);
+                  e);
           return false;
         }
       }
@@ -659,13 +665,16 @@ public class HDFSEventSink extends AbstractSink implements Configurable {
    * In addition, since the underlying Hadoop APIs we are using for
    * impersonation are static, we define this method as static as well.
    *
-   * @param principal Fully-qualified principal to use for authentication.
-   * @param keytab Location of keytab file containing credentials for principal.
+   * @param principal
+   *         Fully-qualified principal to use for authentication.
+   * @param keytab
+   *         Location of keytab file containing credentials for principal.
    * @return Logged-in user
-   * @throws IOException if login fails.
+   * @throws IOException
+   *         if login fails.
    */
   private static synchronized UserGroupInformation kerberosLogin(
-      HDFSEventSink sink, String principal, String keytab) throws IOException {
+          HDFSEventSink sink, String principal, String keytab) throws IOException {
 
     // if we are the 2nd user thru the lock, the login should already be
     // available statically if login was successful
@@ -681,13 +690,13 @@ public class HDFSEventSink extends AbstractSink implements Configurable {
     // we already have logged in successfully
     if (curUser != null && curUser.getUserName().equals(principal)) {
       LOG.debug("{}: Using existing principal ({}): {}",
-          new Object[] { sink, principal, curUser });
+              new Object[]{sink, principal, curUser});
 
-    // no principal found
+      // no principal found
     } else {
 
       LOG.info("{}: Attempting kerberos login as principal ({}) from keytab " +
-          "file ({})", new Object[] { sink, principal, keytab });
+              "file ({})", new Object[]{sink, principal, keytab});
 
       // attempt static kerberos login
       UserGroupInformation.loginUserFromKeytab(principal, keytab);
@@ -700,52 +709,11 @@ public class HDFSEventSink extends AbstractSink implements Configurable {
   @Override
   public String toString() {
     return "{ Sink type:" + getClass().getSimpleName() + ", name:" + getName() +
-        " }";
+            " }";
   }
 
-  /**
-   * Append to bucket writer with timeout enforced
-   */
-  private void append(final BucketWriter bucketWriter, final Event event)
-      throws IOException, InterruptedException {
-
-    // Write the data to HDFS
-    callWithTimeout(new Callable<Void>() {
-      @Override
-      public Void call() throws Exception {
-        bucketWriter.append(event);
-        return null;
-      }
-    });
-  }
-
-  /**
-   * Flush bucket writer with timeout enforced
-   */
-  private void flush(final BucketWriter bucketWriter)
-      throws IOException, InterruptedException {
-
-    callWithTimeout(new Callable<Void>() {
-      @Override
-      public Void call() throws Exception {
-        bucketWriter.flush();
-        return null;
-      }
-    });
-  }
-
-  /**
-   * Close bucket writer with timeout enforced
-   */
-  private void close(final BucketWriter bucketWriter)
-      throws IOException, InterruptedException {
-
-    callWithTimeout(new Callable<Void>() {
-      @Override
-      public Void call() throws Exception {
-        bucketWriter.close();
-        return null;
-      }
-    });
+  @VisibleForTesting
+  void setBucketClock(Clock clock) {
+    BucketPath.setClock(clock);
   }
 }

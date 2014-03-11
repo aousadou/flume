@@ -21,6 +21,12 @@ package org.apache.flume.channel.file;
 import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+
+import org.apache.flume.channel.file.proto.ProtosFactory;
+
+import com.google.common.base.Preconditions;
 
 /**
  * Represents a Take on disk
@@ -28,11 +34,11 @@ import java.io.IOException;
 class Take extends TransactionEventRecord {
   private int offset;
   private int fileID;
-  Take(Long transactionID) {
-    super(transactionID);
+  Take(Long transactionID, Long logWriteOrderID) {
+    super(transactionID, logWriteOrderID);
   }
-  Take(Long transactionID, int offset, int fileID) {
-    this(transactionID);
+  Take(Long transactionID, Long logWriteOrderID, int offset, int fileID) {
+    this(transactionID, logWriteOrderID);
     this.offset = offset;
     this.fileID = fileID;
   }
@@ -58,7 +64,35 @@ class Take extends TransactionEventRecord {
     out.writeInt(fileID);
   }
   @Override
+  void writeProtos(OutputStream out) throws IOException {
+    ProtosFactory.Take.Builder takeBuilder = ProtosFactory.Take.newBuilder();
+    takeBuilder.setFileID(fileID);
+    takeBuilder.setOffset(offset);
+    takeBuilder.build().writeDelimitedTo(out);
+  }
+  @Override
+  void readProtos(InputStream in) throws IOException {
+    ProtosFactory.Take take = Preconditions.checkNotNull(ProtosFactory.
+        Take.parseDelimitedFrom(in), "Take cannot be null");
+    fileID = take.getFileID();
+    offset = take.getOffset();
+  }
+  @Override
   short getRecordType() {
     return Type.TAKE.get();
+  }
+  @Override
+  public String toString() {
+    StringBuilder builder = new StringBuilder();
+    builder.append("Take [offset=");
+    builder.append(offset);
+    builder.append(", fileID=");
+    builder.append(fileID);
+    builder.append(", getLogWriteOrderID()=");
+    builder.append(getLogWriteOrderID());
+    builder.append(", getTransactionID()=");
+    builder.append(getTransactionID());
+    builder.append("]");
+    return builder.toString();
   }
 }

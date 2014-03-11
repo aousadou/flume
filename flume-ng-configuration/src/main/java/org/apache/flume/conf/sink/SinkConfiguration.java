@@ -111,7 +111,44 @@ public class SinkConfiguration extends ComponentConfiguration {
      *
      * @see AvroSink
      */
-    AVRO("org.apache.flume.conf.sink.AvroSinkConfiguration");
+    AVRO("org.apache.flume.conf.sink.AvroSinkConfiguration"),
+
+    /**
+     * Thrift sink
+     *
+     * @see ThriftSink
+     */
+    THRIFT("org.apache.flume.conf.sink.ThriftSinkConfiguration"),
+
+    /**
+     * ElasticSearch Sink
+     *
+     * @see org.apache.flume.sink.elasticsearch.ElasticSearchSink
+     */
+    ELASTICSEARCH("org.apache.flume.sink.elasticsearch.ElasticSearchSinkConfiguration"),
+
+    /**
+     * HBase Sink
+     *
+     * @see org.apache.flume.sink.hbase.HBaseSink
+     */
+    HBASE("org.apache.flume.sink.hbase.HBaseSinkConfiguration"),
+
+    /**
+     * AsyncHBase Sink
+     *
+     * @see org.apache.flume.sink.hbase.AsyncHBaseSink
+     */
+    ASYNCHBASE("org.apache.flume.sink.hbase.HBaseSinkConfiguration"),
+
+
+    /**
+     * MorphlineSolr sink
+     *
+     * @see org.apache.flume.sink.solr.morphline.MorphlineSolrSink
+     */
+    MORPHLINE_SOLR("org.apache.flume.sink.solr.morphline" +
+      ".MorphlineSolrSinkConfiguration");
 
     private final String sinkConfigurationName;
 

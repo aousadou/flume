@@ -17,6 +17,9 @@
  * under the License.
  */
 package org.apache.flume.sink.hbase;
+
+import org.apache.hadoop.hbase.HConstants;
+
 /**
  * Constants used for configuration of HBaseSink and AsyncHBaseSink
  *
@@ -46,6 +49,25 @@ public class HBaseSinkConfigurationConstants {
 
   public static final String CONFIG_TIMEOUT = "timeout";
 
-  public static final long DEFAULT_TIMEOUT = Long.MAX_VALUE;
+  public static final String CONFIG_ENABLE_WAL = "enableWal";
+
+  public static final boolean DEFAULT_ENABLE_WAL = true;
+
+  public static final long DEFAULT_TIMEOUT = 60000;
+
+  public static final String CONFIG_KEYTAB = "kerberosKeytab";
+
+  public static final String CONFIG_PRINCIPAL = "kerberosPrincipal";
+
+  public static final String ZK_QUORUM = "zookeeperQuorum";
+
+  public static final String ZK_ZNODE_PARENT = "znodeParent";
+
+  public static final String DEFAULT_ZK_ZNODE_PARENT =
+      HConstants.DEFAULT_ZOOKEEPER_ZNODE_PARENT;
+
+  public static final String CONFIG_COALESCE_INCREMENTS = "coalesceIncrements";
+
+  public static final Boolean DEFAULT_COALESCE_INCREMENTS = false;
 
 }

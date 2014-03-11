@@ -27,7 +27,7 @@ limitations under the License.
   <modelVersion>4.0.0</modelVersion>
   <groupId>org.apache.flume</groupId>
   <artifactId>flume-parent</artifactId>
-  <version>1.3.0-SNAPSHOT</version>
+  <version>1.5.0-SNAPSHOT</version>
   <packaging>pom</packaging>
 
   <name>Apache Flume</name>
@@ -36,18 +36,28 @@ limitations under the License.
     <!-- Set default encoding to UTF-8 to remove maven complaints -->
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
+    <!-- Java compiler configuration -->
+    <sourceJavaVersion>1.6</sourceJavaVersion>
+    <targetJavaVersion>1.6</targetJavaVersion>
+
     <!-- defaults for flaky test and focused test exclusions -->
     <test.exclude.pattern>$</test.exclude.pattern> <!-- junk pattern -->
     <test.include.pattern>**/Test*.java</test.include.pattern>
     <siteUrlDeployment>file://people.apache.org/www/incubator.apache.org/flume</siteUrlDeployment>
     <stagingDirectory>${project.basedir}/target/docs</stagingDirectory>
 
+    <avro.version>1.7.3</avro.version>
+    <elasticsearch.version>0.90.1</elasticsearch.version>
+
+    <hadoop2.version>2.1.0-beta</hadoop2.version>
   </properties>
 
   <modules>
     <module>flume-ng-core</module>
     <module>flume-ng-configuration</module>
+    <module>flume-ng-embedded-agent</module>
     <module>flume-ng-sinks</module>
+    <module>flume-ng-sources</module>
     <module>flume-ng-node</module>
     <module>flume-ng-dist</module>
     <module>flume-ng-channels</module>
@@ -55,9 +65,11 @@ limitations under the License.
     <module>flume-ng-clients</module>
     <module>flume-ng-sdk</module>
     <module>flume-ng-tests</module>
+    <module>flume-tools</module>
   </modules>
 
   <profiles>
+
     <profile>
       <id>hadoop-1.0</id>
       <activation>
@@ -67,7 +79,9 @@ limitations under the License.
       </activation>
       <properties>
         <hadoop.version>1.0.1</hadoop.version>
+        <hbase.version>0.92.1</hbase.version>
         <hadoop.common.artifact.id>hadoop-core</hadoop.common.artifact.id>
+        <thrift.version>0.7.0</thrift.version>
       </properties>
       <dependencyManagement>
         <dependencies>
@@ -86,16 +100,18 @@ limitations under the License.
     </profile>
 
     <profile>
-      <id>hadoop-0.23</id>
+      <id>hadoop-2</id>
       <activation>
         <property>
           <name>hadoop.profile</name>
-          <value>23</value>
+          <value>2</value>
         </property>
       </activation>
       <properties>
-        <hadoop.version>0.23.1</hadoop.version>
+        <hadoop.version>${hadoop2.version}</hadoop.version>
+        <hbase.version>0.94.2</hbase.version>
         <hadoop.common.artifact.id>hadoop-common</hadoop.common.artifact.id>
+        <thrift.version>0.8.0</thrift.version>
       </properties>
       <dependencyManagement>
         <dependencies>
@@ -116,15 +132,32 @@ limitations under the License.
           </dependency>
           <dependency>
             <groupId>org.apache.hadoop</groupId>
+            <artifactId>hadoop-client</artifactId>
+            <version>${hadoop.version}</version>
+          </dependency>
+          <dependency>
+            <groupId>org.apache.hadoop</groupId>
+            <artifactId>hadoop-annotations</artifactId>
+            <version>${hadoop.version}</version>
+          </dependency>
+          <dependency>
+            <groupId>org.apache.hadoop</groupId>
             <artifactId>hadoop-auth</artifactId>
             <version>${hadoop.version}</version>
+          </dependency>
+
+          <!-- only compatible with hadoop-2 -->
+          <dependency>
+            <groupId>org.apache.flume.flume-ng-sinks</groupId>
+            <artifactId>flume-dataset-sink</artifactId>
+            <version>1.5.0-SNAPSHOT</version>
           </dependency>
         </dependencies>
       </dependencyManagement>
     </profile>
 
     <profile>
-      <id>compileThrift</id>
+      <id>compileThriftLegacy</id>
       <activation>
         <activeByDefault>false</activeByDefault>
       </activation>
@@ -142,24 +175,27 @@ limitations under the License.
       </activation>
     </profile>
 
-    <!-- maven 2 & 3 compat for reporting plugin -->
     <profile>
-      <id>maven-3</id>
+      <id>windows</id>
       <activation>
-        <file>
-          <!--  This employs that the basedir expression is only recognized by Maven 3.x (see MNG-2363) -->
-          <exists>${basedir}</exists>
-        </file>
+        <os>
+          <family>Windows</family>
+        </os>
       </activation>
+    </profile>
+
+    <profile>
+      <id>sign</id>
       <build>
         <plugins>
           <plugin>
-            <artifactId>maven-site-plugin</artifactId>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-gpg-plugin</artifactId>
             <executions>
               <execution>
-                <id>attach-descriptor</id>
+                <phase>verify</phase>
                 <goals>
-                  <goal>attach-descriptor</goal>
+                  <goal>sign</goal>
                 </goals>
               </execution>
             </executions>
@@ -167,6 +203,54 @@ limitations under the License.
         </plugins>
       </build>
     </profile>
+
+    <profile>
+      <id>site</id>
+
+      <build>
+        <plugins>
+
+          <plugin>
+            <artifactId>maven-javadoc-plugin</artifactId>
+            <executions>
+              <execution>
+                <id>javadoc-jar</id>
+                <phase>package</phase>
+                <goals>
+                  <goal>aggregate-jar</goal>
+                </goals>
+              </execution>
+            </executions>
+          </plugin>
+
+          <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-site-plugin</artifactId>
+            <executions>
+              <execution>
+                <id>flume-site</id>
+                <phase>package</phase>
+                <goals>
+                  <goal>site</goal>
+                </goals>
+              </execution>
+              <!--
+              <execution>
+                <id>flume-site-dist</id>
+                <phase>package</phase>
+                <goals>
+                  <goal>stage</goal>
+                </goals>
+              </execution>
+              -->
+            </executions>
+          </plugin>
+
+        </plugins>
+      </build>
+
+    </profile>
+
   </profiles>
 
   <inceptionYear>2009</inceptionYear>
@@ -411,33 +495,12 @@ limitations under the License.
   <build>
 
     <plugins>
+
       <plugin>
         <groupId>org.apache.rat</groupId>
         <artifactId>apache-rat-plugin</artifactId>
       </plugin>
 
-      <plugin>
-        <artifactId>maven-javadoc-plugin</artifactId>
-        <version>2.8.1</version>
-        <executions>
-          <execution>
-            <id>javadoc-jar</id>
-            <phase>package</phase>
-            <goals>
-              <goal>aggregate-jar</goal>
-            </goals>
-            <configuration>
-              <!-- switch on dependency-driven aggregation -->
-              <includeDependencySources>true</includeDependencySources>
-
-              <dependencySourceIncludes>
-                <!-- include ONLY flume multi-module dependencies -->
-                <dependencySourceInclude>org.apache.flume:*</dependencySourceInclude>
-              </dependencySourceIncludes>
-            </configuration>
-          </execution>
-        </executions>
-      </plugin>
     </plugins>
 
     <pluginManagement>
@@ -448,18 +511,18 @@ limitations under the License.
           <artifactId>maven-compiler-plugin</artifactId>
           <version>2.3.2</version>
           <configuration>
-            <source>1.6</source>
-            <target>1.6</target>
+            <source>${sourceJavaVersion}</source>
+            <target>${targetJavaVersion}</target>
           </configuration>
         </plugin>
 
         <plugin>
           <groupId>org.apache.maven.plugins</groupId>
           <artifactId>maven-surefire-plugin</artifactId>
-          <version>2.12</version>
+          <version>2.12.3</version>
           <configuration>
             <forkMode>always</forkMode>
-            <forkedProcessTimeoutInSeconds>480</forkedProcessTimeoutInSeconds>
+            <forkedProcessTimeoutInSeconds>900</forkedProcessTimeoutInSeconds>
             <redirectTestOutputToFile>true</redirectTestOutputToFile>
             <includes>
               <include>${test.include.pattern}</include>
@@ -477,23 +540,31 @@ limitations under the License.
           <version>0.7</version>
           <executions>
             <execution>
-              <id>test.rat</id>
-              <phase>test</phase>
+              <id>verify.rat</id>
+              <phase>verify</phase>
               <goals>
                 <goal>check</goal>
               </goals>
               <configuration>
                 <excludes>
-                  <exclude>.idea/</exclude>
+                  <exclude>**/.idea/</exclude>
                   <exclude>**/*.iml</exclude>
+                  <exclude>**/nb-configuration.xml</exclude>
                   <exclude>.git/</exclude>
+                  <exclude>patchprocess/</exclude>
                   <exclude>.gitignore</exclude>
                   <!-- ASF jenkins box puts the Maven repo in our root directory. -->
                   <exclude>.repository/</exclude>
                   <exclude>**/*.diff</exclude>
                   <exclude>**/*.patch</exclude>
                   <exclude>**/*.avsc</exclude>
+                  <exclude>**/*.avro</exclude>
                   <exclude>**/docs/**</exclude>
+                  <exclude>**/test/resources/**</exclude>
+                  <exclude>**/.settings/*</exclude>
+                  <exclude>**/.classpath</exclude>
+                  <exclude>**/.project</exclude>
+                  <exclude>**/target/**</exclude>
                 </excludes>
               </configuration>
             </execution>
@@ -501,26 +572,31 @@ limitations under the License.
         </plugin>
 
         <plugin>
-          <groupId>org.tomdz.maven</groupId>
-          <artifactId>sphinx-maven-plugin</artifactId>
-          <version>1.0.2</version>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-javadoc-plugin</artifactId>
+          <version>2.9</version>
+          <configuration>
+            <outputDirectory>${project.build.directory}/site/apidocs</outputDirectory>
+            <!-- switch on dependency-driven aggregation -->
+            <includeDependencySources>true</includeDependencySources>
+
+            <dependencySourceIncludes>
+              <!-- include ONLY flume multi-module dependencies -->
+              <dependencySourceInclude>org.apache.flume:*</dependencySourceInclude>
+            </dependencySourceIncludes>
+          </configuration>
         </plugin>
 
         <plugin>
           <groupId>org.apache.maven.plugins</groupId>
           <artifactId>maven-assembly-plugin</artifactId>
-          <version>2.2.2</version>
+          <version>2.3</version>
         </plugin>
 
         <plugin>
           <groupId>org.apache.avro</groupId>
           <artifactId>avro-maven-plugin</artifactId>
-          <!--
-          <configuration>
-            <stringType>String</stringType>
-          </configuration>
-          -->
-          <version>1.6.1</version>
+          <version>${avro.version}</version>
         </plugin>
 
         <plugin>
@@ -532,28 +608,10 @@ limitations under the License.
         <plugin>
           <groupId>org.apache.maven.plugins</groupId>
           <artifactId>maven-site-plugin</artifactId>
-          <version>3.1</version>
+          <version>3.3</version>
           <configuration>
             <siteDirectory>${project.basedir}/flume-ng-doc</siteDirectory>
           </configuration>
-          <dependencies>
-          </dependencies>
-          <executions>
-            <execution>
-              <id>flume-site</id>
-              <phase>package</phase>
-              <goals>
-                <goal>site</goal>
-              </goals>
-            </execution>
-            <execution>
-              <id>flume-site-dist</id>
-              <phase>package</phase>
-              <goals>
-                <goal>stage</goal>
-              </goals>
-            </execution>
-          </executions>
         </plugin>
 
         <plugin>
@@ -562,7 +620,7 @@ limitations under the License.
           <configuration>
             <filesets>
               <fileset>
-                <directory>flume-docs</directory>
+                <directory>docs</directory>
                 <includes>
                   <include>**</include>
                 </includes>
@@ -593,6 +651,13 @@ limitations under the License.
         <scope>test</scope>
       </dependency>
 
+      <dependency>
+        <groupId>org.easytesting</groupId>
+        <artifactId>fest-reflect</artifactId>
+        <version>1.4</version>
+        <scope>test</scope>
+      </dependency>
+
       <!-- Dependencies: compile -->
 
       <dependency>
@@ -602,15 +667,21 @@ limitations under the License.
       </dependency>
 
       <dependency>
+        <groupId>commons-lang</groupId>
+        <artifactId>commons-lang</artifactId>
+        <version>2.5</version>
+      </dependency>
+
+      <dependency>
         <groupId>com.google.guava</groupId>
         <artifactId>guava</artifactId>
-        <version>10.0.1</version>
+        <version>11.0.2</version>
       </dependency>
 
       <dependency>
         <groupId>log4j</groupId>
         <artifactId>log4j</artifactId>
-        <version>1.2.16</version>
+        <version>1.2.17</version>
         <exclusions>
           <exclusion>
             <groupId>com.sun.jdmk</groupId>
@@ -621,6 +692,12 @@ limitations under the License.
             <artifactId>jmxri</artifactId>
           </exclusion>
         </exclusions>
+      </dependency>
+
+      <dependency>
+        <groupId>log4j</groupId>
+        <artifactId>apache-log4j-extras</artifactId>
+        <version>1.1</version>
       </dependency>
 
       <dependency>
@@ -638,23 +715,27 @@ limitations under the License.
       <dependency>
         <groupId>org.apache.avro</groupId>
         <artifactId>avro</artifactId>
-        <version>1.6.3</version>
+        <version>${avro.version}</version>
       </dependency>
 
       <dependency>
         <groupId>org.apache.avro</groupId>
         <artifactId>avro-compiler</artifactId>
-        <version>1.6.3</version>
+        <version>${avro.version}</version>
       </dependency>
 
       <dependency>
         <groupId>org.apache.avro</groupId>
         <artifactId>avro-ipc</artifactId>
-        <version>1.6.3</version>
+        <version>${avro.version}</version>
         <exclusions>
           <exclusion>
             <groupId>org.mortbay.jetty</groupId>
             <artifactId>servlet-api</artifactId>
+          </exclusion>
+          <exclusion>
+            <groupId>io.netty</groupId>
+            <artifactId>netty</artifactId>
           </exclusion>
         </exclusions>
       </dependency>
@@ -662,7 +743,7 @@ limitations under the License.
       <dependency>
         <groupId>org.apache.thrift</groupId>
         <artifactId>libthrift</artifactId>
-        <version>0.6.1</version>
+        <version>${thrift.version}</version>
         <exclusions>
           <exclusion>
             <groupId>javax.servlet</groupId>
@@ -672,15 +753,59 @@ limitations under the License.
       </dependency>
 
       <dependency>
+        <groupId>com.google.protobuf</groupId>
+        <artifactId>protobuf-java</artifactId>
+        <scope>compile</scope>
+        <version>2.5.0</version>
+      </dependency>
+
+      <dependency>
         <groupId>org.mortbay.jetty</groupId>
         <artifactId>servlet-api</artifactId>
         <version>2.5-20110124</version>
       </dependency>
 
       <dependency>
+        <groupId>org.mortbay.jetty</groupId>
+        <artifactId>jetty-util</artifactId>
+        <version>6.1.26</version>
+      </dependency>
+
+      <dependency>
+        <groupId>org.mortbay.jetty</groupId>
+        <artifactId>jetty</artifactId>
+        <version>6.1.26</version>
+      </dependency>
+
+      <dependency>
+        <groupId>org.apache.httpcomponents</groupId>
+        <artifactId>httpclient</artifactId>
+        <version>4.2.1</version>
+      </dependency>
+
+      <dependency>
+        <groupId>org.mapdb</groupId>
+        <artifactId>mapdb</artifactId>
+        <version>0.9.9</version>
+      </dependency>
+
+      <!--  Gson: Java to Json conversion -->
+      <dependency>
+        <groupId>com.google.code.gson</groupId>
+        <artifactId>gson</artifactId>
+        <version>2.2.2</version>
+      </dependency>
+
+      <dependency>
         <groupId>org.apache.hadoop</groupId>
         <artifactId>hadoop-common</artifactId>
         <version>${hadoop.version}</version>
+      </dependency>
+
+      <dependency>
+        <groupId>commons-codec</groupId>
+        <artifactId>commons-codec</artifactId>
+        <version>1.8</version>
       </dependency>
 
       <dependency>
@@ -734,13 +859,13 @@ limitations under the License.
       <dependency>
         <groupId>org.apache.hbase</groupId>
         <artifactId>hbase</artifactId>
-        <version>0.92.1</version>
+        <version>${hbase.version}</version>
       </dependency>
 
       <dependency>
         <groupId>org.apache.hbase</groupId>
         <artifactId>hbase</artifactId>
-        <version>0.92.1</version>
+        <version>${hbase.version}</version>
         <classifier>tests</classifier>
         <scope>test</scope>
       </dependency>
@@ -751,83 +876,167 @@ limitations under the License.
         <version>${hadoop.version}</version>
       </dependency>
 
+      <dependency>
+        <groupId>org.elasticsearch</groupId>
+        <artifactId>elasticsearch</artifactId>
+        <version>${elasticsearch.version}</version>
+        <optional>true</optional>
+      </dependency>
+
+      <dependency>
+        <groupId>org.elasticsearch</groupId>
+        <artifactId>elasticsearch</artifactId>
+        <version>${elasticsearch.version}</version>
+        <classifier>tests</classifier>
+        <scope>test</scope>
+      </dependency>
+
+      <dependency>
+        <groupId>javax.jms</groupId>
+        <artifactId>jms</artifactId>
+        <version>1.1</version>
+      </dependency>
+
+      <dependency>
+        <groupId>org.apache.activemq</groupId>
+        <artifactId>activemq-core</artifactId>
+        <version>5.7.0</version>
+      </dependency>
+
       <!-- internal module dependencies -->
 
       <dependency>
         <groupId>org.apache.flume</groupId>
         <artifactId>flume-ng-configuration</artifactId>
-        <version>1.3.0-SNAPSHOT</version>
+        <version>1.5.0-SNAPSHOT</version>
       </dependency>
       <dependency>
         <groupId>org.apache.flume</groupId>
         <artifactId>flume-ng-core</artifactId>
-        <version>1.3.0-SNAPSHOT</version>
+        <version>1.5.0-SNAPSHOT</version>
+      </dependency>
+
+      <dependency>
+        <groupId>org.apache.flume</groupId>
+        <artifactId>flume-tools</artifactId>
+        <version>1.5.0-SNAPSHOT</version>
       </dependency>
 
       <dependency>
         <groupId>org.apache.flume</groupId>
         <artifactId>flume-ng-node</artifactId>
-        <version>1.3.0-SNAPSHOT</version>
+        <version>1.5.0-SNAPSHOT</version>
       </dependency>
 
       <dependency>
         <groupId>org.apache.flume.flume-ng-channels</groupId>
         <artifactId>flume-file-channel</artifactId>
-        <version>1.3.0-SNAPSHOT</version>
+        <version>1.5.0-SNAPSHOT</version>
       </dependency>
 
       <dependency>
         <groupId>org.apache.flume.flume-ng-channels</groupId>
         <artifactId>flume-jdbc-channel</artifactId>
-        <version>1.3.0-SNAPSHOT</version>
+        <version>1.5.0-SNAPSHOT</version>
+      </dependency>
+
+      <dependency>
+        <groupId>org.apache.flume.flume-ng-channels</groupId>
+        <artifactId>flume-spillable-memory-channel</artifactId>
+        <version>1.5.0-SNAPSHOT</version>
       </dependency>
 
      <dependency>
        <groupId>org.apache.flume.flume-ng-channels</groupId>
        <artifactId>flume-recoverable-memory-channel</artifactId>
-       <version>1.3.0-SNAPSHOT</version>
+       <version>1.5.0-SNAPSHOT</version>
      </dependency>
 
       <dependency>
         <groupId>org.apache.flume.flume-ng-sinks</groupId>
         <artifactId>flume-hdfs-sink</artifactId>
-        <version>1.3.0-SNAPSHOT</version>
+        <version>1.5.0-SNAPSHOT</version>
       </dependency>
 
       <dependency>
         <groupId>org.apache.flume.flume-ng-sinks</groupId>
         <artifactId>flume-irc-sink</artifactId>
-        <version>1.3.0-SNAPSHOT</version>
+        <version>1.5.0-SNAPSHOT</version>
       </dependency>
 
       <dependency>
         <groupId>org.apache.flume.flume-ng-sinks</groupId>
         <artifactId>flume-ng-hbase-sink</artifactId>
-        <version>1.3.0-SNAPSHOT</version>
+        <version>1.5.0-SNAPSHOT</version>
+      </dependency>
+
+      <dependency>
+        <groupId>org.apache.flume.flume-ng-sinks</groupId>
+        <artifactId>flume-ng-elasticsearch-sink</artifactId>
+        <version>1.5.0-SNAPSHOT</version>
+      </dependency>
+
+      <dependency>
+        <groupId>org.apache.flume.flume-ng-sources</groupId>
+        <artifactId>flume-scribe-source</artifactId>
+        <version>1.5.0-SNAPSHOT</version>
+      </dependency>
+
+      <dependency>
+        <groupId>org.apache.flume.flume-ng-sources</groupId>
+        <artifactId>flume-jms-source</artifactId>
+        <version>1.5.0-SNAPSHOT</version>
+      </dependency>
+
+      <dependency>
+        <groupId>org.apache.flume.flume-ng-sources</groupId>
+        <artifactId>flume-twitter-source</artifactId>
+        <version>1.5.0-SNAPSHOT</version>
       </dependency>
 
       <dependency>
         <groupId>org.apache.flume.flume-ng-legacy-sources</groupId>
         <artifactId>flume-thrift-source</artifactId>
-        <version>1.3.0-SNAPSHOT</version>
+        <version>1.5.0-SNAPSHOT</version>
       </dependency>
 
       <dependency>
         <groupId>org.apache.flume.flume-ng-legacy-sources</groupId>
         <artifactId>flume-avro-source</artifactId>
-        <version>1.3.0-SNAPSHOT</version>
+        <version>1.5.0-SNAPSHOT</version>
       </dependency>
 
       <dependency>
         <groupId>org.apache.flume</groupId>
         <artifactId>flume-ng-sdk</artifactId>
-        <version>1.3.0-SNAPSHOT</version>
+        <version>1.5.0-SNAPSHOT</version>
+      </dependency>
+
+      <dependency>
+        <groupId>org.apache.flume</groupId>
+        <artifactId>flume-ng-sdk</artifactId>
+        <version>1.5.0-SNAPSHOT</version>
+        <classifier>tests</classifier>
+        <scope>test</scope>
       </dependency>
 
       <dependency>
         <groupId>org.apache.flume.flume-ng-clients</groupId>
         <artifactId>flume-ng-log4jappender</artifactId>
-        <version>1.3.0-SNAPSHOT</version>
+        <version>1.5.0-SNAPSHOT</version>
+      </dependency>
+
+      <dependency>
+        <groupId>org.apache.flume.flume-ng-clients</groupId>
+        <artifactId>flume-ng-log4jappender</artifactId>
+        <version>1.5.0-SNAPSHOT</version>
+        <classifier>jar-with-dependencies</classifier>
+      </dependency>
+
+      <dependency>
+        <groupId>org.apache.flume</groupId>
+        <artifactId>flume-ng-embedded-agent</artifactId>
+        <version>1.5.0-SNAPSHOT</version>
       </dependency>
 
       <dependency>
@@ -842,24 +1051,69 @@ limitations under the License.
         <version>1.4.1</version>
       </dependency>
 
+      <dependency>
+        <groupId>org.apache.mina</groupId>
+        <artifactId>mina-core</artifactId>
+        <version>2.0.4</version>
+      </dependency>
 
-     <dependency>
-      <groupId>org.hbase</groupId>
-      <artifactId>asynchbase</artifactId>
-      <version>1.2.0</version>
-      <exclusions>
-        <exclusion>
-          <groupId>org.slf4j</groupId>
-          <artifactId>log4j-over-slf4j</artifactId>
-        </exclusion>
-      </exclusions>
-     </dependency>
+      <dependency>
+        <groupId>org.hbase</groupId>
+        <artifactId>asynchbase</artifactId>
+        <version>1.5.0</version>
+        <exclusions>
+          <exclusion>
+            <groupId>org.slf4j</groupId>
+            <artifactId>log4j-over-slf4j</artifactId>
+          </exclusion>
+          <exclusion>
+            <groupId>org.jboss.netty</groupId>
+            <artifactId>netty</artifactId>
+          </exclusion>
+        </exclusions>
+      </dependency>
+
+      <dependency>
+        <groupId>io.netty</groupId>
+        <artifactId>netty</artifactId>
+        <version>3.5.12.Final</version>
+      </dependency>
+
+      <dependency>
+        <groupId>org.apache.solr</groupId>
+        <artifactId>solr-cell</artifactId>
+        <version>4.3.0</version>
+      </dependency>
+
+      <!-- Dependencies of the Twitter source -->
+      <dependency>
+        <groupId>org.twitter4j</groupId>
+        <artifactId>twitter4j-core</artifactId>
+        <version>3.0.3</version>
+      </dependency>
+      <dependency>
+        <groupId>org.twitter4j</groupId>
+        <artifactId>twitter4j-media-support</artifactId>
+        <version>3.0.3</version>
+      </dependency>
+      <dependency>
+        <groupId>org.twitter4j</groupId>
+        <artifactId>twitter4j-stream</artifactId>
+        <version>3.0.3</version>
+      </dependency>
+
+      <dependency>
+        <groupId>org.kitesdk</groupId>
+        <artifactId>kite-data-core</artifactId>
+        <version>0.10.1</version>
+      </dependency>
 
     </dependencies>
   </dependencyManagement>
 
   <reporting>
     <plugins>
+
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-project-info-reports-plugin</artifactId>
@@ -877,6 +1131,7 @@ limitations under the License.
               <report>cim</report>
               <report>scm</report>
 -->
+              <!-- warning: the "about" report conflicts with sphinx-maven -->
             </reports>
           </reportSet>
         </reportSets>

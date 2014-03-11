@@ -64,7 +64,42 @@ public enum SinkType {
    *
    * @see AvroSink
    */
-  AVRO("org.apache.flume.sink.AvroSink");
+  AVRO("org.apache.flume.sink.AvroSink"),
+
+  /**
+   * Thrift sink
+   *
+   * @see ThriftSink
+   */
+  THRIFT("org.apache.flume.sink.ThriftSink"),
+
+  /**
+   * ElasticSearch sink
+   *
+   * @see org.apache.flume.sink.elasticsearch.ElasticSearchSink
+   */
+  ELASTICSEARCH("org.apache.flume.sink.elasticsearch.ElasticSearchSink"),
+
+  /**
+   * HBase sink
+   *
+   * @see org.apache.flume.sink.hbase.HBaseSink
+   */
+  HBASE("org.apache.flume.sink.hbase.HBaseSink"),
+
+  /**
+   * AsyncHBase sink
+   *
+   * @see org.apache.flume.sink.hbase.AsyncHBaseSink
+   */
+  ASYNCHBASE("org.apache.flume.sink.hbase.AsyncHBaseSink"),
+
+  /**
+   * MorphlineSolr sink
+   *
+   * @see org.apache.flume.sink.solr.morphline.MorphlineSolrSink
+   */
+  MORPHLINE_SOLR("org.apache.flume.sink.solr.morphline.MorphlineSolrSink");
 
   private final String sinkClassName;
 

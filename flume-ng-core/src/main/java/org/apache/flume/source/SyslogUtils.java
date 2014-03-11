@@ -19,23 +19,27 @@
 
 package org.apache.flume.source;
 
+import org.apache.flume.Event;
+import org.apache.flume.annotations.InterfaceAudience;
+import org.apache.flume.annotations.InterfaceStability;
+import org.apache.flume.event.EventBuilder;
+import org.jboss.netty.buffer.ChannelBuffer;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.io.ByteArrayOutputStream;
-import java.io.IOException;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.Scanner;
 import java.util.regex.MatchResult;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
-import org.apache.flume.Event;
-import org.apache.flume.event.EventBuilder;
-import org.jboss.netty.buffer.ChannelBuffer;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
+@InterfaceAudience.Private
+@InterfaceStability.Evolving
 public class SyslogUtils {
   final public static String SYSLOG_TIMESTAMP_FORMAT_RFC5424_2 = "yyyy-MM-dd'T'HH:mm:ss.SZ";
   final public static String SYSLOG_TIMESTAMP_FORMAT_RFC5424_1 = "yyyy-MM-dd'T'HH:mm:ss.S";
@@ -44,15 +48,18 @@ public class SyslogUtils {
   final public static String SYSLOG_TIMESTAMP_FORMAT_RFC3164_1 = "yyyyMMM d HH:mm:ss";
 
   final public static String SYSLOG_MSG_RFC5424_0 =
-      "[(?:\\d\\s)]?" +// version
-  // yyyy-MM-dd'T'HH:mm:ss.SZ or yyyy-MM-dd'T'HH:mm:ss.S+hh:mm or - (null stamp)
-      "(?:(\\d{4}[-]\\d{2}[-]\\d{2}[T]\\d{2}[:]\\d{2}[:]\\d{2}(?:\\.\\d{1,6})?(?:[+-]\\d{2}[:]\\d{2}|Z)?)|-)" + // stamp
+      "(?:\\<\\d{1,3}\\>\\d?\\s?)" + // priority
+      /* yyyy-MM-dd'T'HH:mm:ss.SZ or yyyy-MM-dd'T'HH:mm:ss.S+hh:mm or - (null stamp) */
+      "(?:" +
+        "(\\d{4}[-]\\d{2}[-]\\d{2}[T]\\d{2}[:]\\d{2}[:]\\d{2}" +
+        "(?:\\.\\d{1,6})?(?:[+-]\\d{2}[:]\\d{2}|Z)?)|-)" + // stamp
       "\\s" + // separator
       "(?:([\\w][\\w\\d\\.@-]*)|-)" + // host name or - (null)
       "\\s" + // separator
       "(.*)$"; // body
 
   final public static String SYSLOG_MSG_RFC3164_0 =
+      "(?:\\<\\d{1,3}\\>\\d?\\s?)" +
       // stamp MMM d HH:mm:ss, single digit date has two spaces
       "([A-Z][a-z][a-z]\\s{1,2}\\d{1,2}\\s\\d{2}[:]\\d{2}[:]\\d{2})" +
       "\\s" + // separator
@@ -78,15 +85,16 @@ public class SyslogUtils {
   private boolean isBadEvent;
   private boolean isIncompleteEvent;
   private Integer maxSize;
+  private boolean keepFields;
 
-  private class SyslogFormater {
-    public String regexPattern;
+  private class SyslogFormatter {
+    public Pattern regexPattern;
     public ArrayList<String> searchPattern = new ArrayList<String>();
     public ArrayList<String> replacePattern = new ArrayList<String>();
     public ArrayList<SimpleDateFormat> dateFormat = new ArrayList<SimpleDateFormat>();
     public boolean addYear;
   }
-  private ArrayList<SyslogFormater> formats = new ArrayList<SyslogFormater>();
+  private ArrayList<SyslogFormatter> formats = new ArrayList<SyslogFormatter>();
 
   private String timeStamp = null;
   private String hostName = null;
@@ -97,15 +105,16 @@ public class SyslogUtils {
   }
 
   public SyslogUtils(boolean isUdp) {
-    this(DEFAULT_SIZE, isUdp);
+    this(DEFAULT_SIZE, SyslogSourceConfigurationConstants.DEFAULT_KEEP_FIELDS, isUdp);
   }
 
-  public SyslogUtils(Integer eventSize, boolean isUdp){
+  public SyslogUtils(Integer eventSize, boolean keepFields, boolean isUdp) {
     this.isUdp = isUdp;
     isBadEvent = false;
     isIncompleteEvent = false;
     maxSize = (eventSize < MIN_SIZE) ? MIN_SIZE : eventSize;
     baos = new ByteArrayOutputStream(eventSize);
+    this.keepFields = keepFields;
     initHeaderFormats();
   }
 
@@ -115,9 +124,9 @@ public class SyslogUtils {
         SyslogSourceConfigurationConstants.CONFIG_REGEX)) {
       return;
     }
-    SyslogFormater fmt1 = new SyslogFormater();
-    fmt1.regexPattern = formatProp.get(
-        SyslogSourceConfigurationConstants.CONFIG_REGEX);
+    SyslogFormatter fmt1 = new SyslogFormatter();
+    fmt1.regexPattern = Pattern.compile( formatProp.get(
+        SyslogSourceConfigurationConstants.CONFIG_REGEX) );
     if (formatProp.containsKey(
         SyslogSourceConfigurationConstants.CONFIG_SEARCH)) {
       fmt1.searchPattern.add(formatProp.get(
@@ -139,8 +148,8 @@ public class SyslogUtils {
   // setup built-in formats
   private void initHeaderFormats() {
     // setup RFC5424 formater
-    SyslogFormater fmt1 = new SyslogFormater();
-    fmt1.regexPattern = SYSLOG_MSG_RFC5424_0;
+    SyslogFormatter fmt1 = new SyslogFormatter();
+    fmt1.regexPattern = Pattern.compile(SYSLOG_MSG_RFC5424_0);
     // 'Z' in timestamp indicates UTC zone, so replace it it with '+0000' for date formatting
     fmt1.searchPattern.add("Z");
     fmt1.replacePattern.add("+0000");
@@ -154,8 +163,8 @@ public class SyslogUtils {
     fmt1.addYear = false;
 
     // setup RFC3164 formater
-    SyslogFormater fmt2 = new SyslogFormater();
-    fmt2.regexPattern = SYSLOG_MSG_RFC3164_0;
+    SyslogFormatter fmt2 = new SyslogFormatter();
+    fmt2.regexPattern = Pattern.compile(SYSLOG_MSG_RFC3164_0);
     // the single digit date has two spaces, so trim it
     fmt2.searchPattern.add("  ");
     fmt2.replacePattern.add(" ");
@@ -196,7 +205,7 @@ public class SyslogUtils {
     if(!isBadEvent){
       pri = Integer.parseInt(prio.toString());
       sev = pri % 8;
-      facility = pri - sev;
+      facility = pri / 8;
       formatHeaders();
     }
 
@@ -218,8 +227,13 @@ public class SyslogUtils {
       headers.put(EVENT_STATUS, SyslogStatus.INCOMPLETE.getSyslogStatus());
     }
 
-    if ((msgBody != null) && (msgBody.length() > 0)) {
-      body = msgBody.getBytes();
+    if (!keepFields) {
+      if ((msgBody != null) && (msgBody.length() > 0)) {
+        body = msgBody.getBytes();
+      } else {
+        // Parse failed.
+        body = baos.toByteArray();
+      }
     } else {
       body = baos.toByteArray();
     }
@@ -230,18 +244,15 @@ public class SyslogUtils {
 
   // Apply each known pattern to message
   private void formatHeaders() {
-    Scanner scanner = new Scanner(baos.toString());
-    MatchResult res = null;
-
+    String eventStr = baos.toString();
     for(int p=0; p < formats.size(); p++) {
-      SyslogFormater fmt = formats.get(p);
-      try {
-        scanner.findInLine(fmt.regexPattern);
-        res = scanner.match();
-      } catch (IllegalStateException e) {
-        // Ignore and move on ..
+      SyslogFormatter fmt = formats.get(p);
+      Pattern pattern = fmt.regexPattern;
+      Matcher matcher = pattern.matcher(eventStr);
+      if (! matcher.matches()) {
         continue;
       }
+      MatchResult res = matcher.toMatchResult();
       for (int grp=1; grp <= res.groupCount(); grp++) {
         String value = res.group(grp);
         if (grp == SYSLOG_TIMESTAMP_POS) {
@@ -307,14 +318,15 @@ public class SyslogUtils {
         switch (m) {
         case START:
           if (b == '<') {
+            baos.write(b);
             m = Mode.PRIO;
           } else if(b == '\n'){
-          //If the character is \n, it was because the last event was exactly
-          //as long  as the maximum size allowed and
-          //the only remaining character was the delimiter - '\n', or
-          //multiple delimiters were sent in a row.
-          //Just ignore it, and move forward, don't change the mode.
-          //This is a no-op, just ignore it.
+            //If the character is \n, it was because the last event was exactly
+            //as long  as the maximum size allowed and
+            //the only remaining character was the delimiter - '\n', or
+            //multiple delimiters were sent in a row.
+            //Just ignore it, and move forward, don't change the mode.
+            //This is a no-op, just ignore it.
             logger.debug("Delimiter found while in START mode, ignoring..");
 
           } else {
@@ -325,6 +337,7 @@ public class SyslogUtils {
           }
           break;
         case PRIO:
+          baos.write(b);
           if (b == '>') {
             m = Mode.DATA;
           } else {
@@ -332,9 +345,6 @@ public class SyslogUtils {
             prio.append(ch);
             if (!Character.isDigit(ch)) {
               isBadEvent = true;
-              //Append the priority to baos:
-              String badPrio = "<"+ prio;
-              baos.write(badPrio.getBytes());
               //If we hit a bad priority, just write as if everything is data.
               m = Mode.DATA;
             }
@@ -363,10 +373,6 @@ public class SyslogUtils {
         doneReading = true;
         e = buildEvent();
       }
-    //} catch (IndexOutOfBoundsException eF) {
-    //    e = buildEvent(prio, baos);
-    } catch (IOException e1) {
-      //no op
     } finally {
       // no-op
     }
@@ -382,4 +388,9 @@ public class SyslogUtils {
     this.maxSize = eventSize;
   }
 
-}
+  public void setKeepFields(Boolean keepFields) {
+    this.keepFields= keepFields;
+  }
+  }
+
+

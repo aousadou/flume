@@ -61,16 +61,49 @@ public enum SourceType {
    *
    * @see org.apache.flume.source.SyslogTcpSource
    */
-
   SYSLOGTCP("org.apache.flume.source.SyslogTcpSource"),
+
+  /**
+   * MultiportSyslogTCPSource
+   *
+   * @see org.apache.flume.source.MultiportSyslogTCPSource
+   */
+  MULTIPORT_SYSLOGTCP("org.apache.flume.source.MultiportSyslogTCPSource"),
 
   /**
    * SyslogUDPSource
    *
    * @see org.apache.flume.source.SyslogUDPSource
    */
+  SYSLOGUDP("org.apache.flume.source.SyslogUDPSource"),
 
-  SYSLOGUDP("org.apache.flume.source.SyslogUDPSource");
+  /**
+   * Spool directory source
+   *
+   * @see org.apache.flume.source.SpoolDirectorySource
+   */
+  SPOOLDIR("org.apache.flume.source.SpoolDirectorySource"),
+
+  /**
+   * HTTP Source
+   *
+   * @see org.apache.flume.source.http.HTTPSource
+   */
+  HTTP("org.apache.flume.source.http.HTTPSource"),
+
+  /**
+   * Thrift Source
+   *
+   * @see org.apache.flume.source.ThriftSource
+   */
+  THRIFT("org.apache.flume.source.ThriftSource"),
+
+  /**
+   * JMS Source
+   *
+   * @see org.apache.flume.source.jms.JMSSource
+   */
+  JMS("org.apache.flume.source.jms.JMSSource");
 
   private final String sourceClassName;
 

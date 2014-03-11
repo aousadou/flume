@@ -19,7 +19,6 @@ package org.apache.flume.conf;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -46,14 +45,14 @@ import org.slf4j.LoggerFactory;
 /**
  * <p>
  * FlumeConfiguration is an in memory representation of the hierarchical
- * configuration namespace required by the PropertiesFileConfigurationProvider.
- * This class is instantiated with a properties object which is parsed to
- * construct the hierarchy in memory. Once the entire set of properties have
+ * configuration namespace required by the ConfigurationProvider.
+ * This class is instantiated with a map or properties object which is parsed
+ * to construct the hierarchy in memory. Once the entire set of properties have
  * been parsed and populated, a validation routine is run that identifies and
  * removes invalid components.
  * </p>
  *
- * @see org.apache.flume.conf.properties.PropertiesFileConfigurationProvider
+ * @see org.apache.flume.node.ConfigurationProvider
  *
  */
 public class FlumeConfiguration {
@@ -66,18 +65,37 @@ public class FlumeConfiguration {
   public static final String NEWLINE = System.getProperty("line.separator",
       "\n");
   public static final String INDENTSTEP = "  ";
-
   /**
    * Creates a populated Flume Configuration object.
+   * @deprecated please use the other constructor
    */
+  @Deprecated
   public FlumeConfiguration(Properties properties) {
     agentConfigMap = new HashMap<String, AgentConfiguration>();
     errors = new LinkedList<FlumeConfigurationError>();
     // Construct the in-memory component hierarchy
-    Enumeration<?> propertyNames = properties.propertyNames();
-    while (propertyNames.hasMoreElements()) {
-      String name = (String) propertyNames.nextElement();
-      String value = properties.getProperty(name);
+    for(Object name : properties.keySet()) {
+      Object value = properties.get(name);
+      if (!addRawProperty(name.toString(), value.toString())) {
+        logger.warn("Configuration property ignored: " + name + " = " + value);
+      }
+    }
+    // Now iterate thru the agentContext and create agent configs and add them
+    // to agentConfigMap
+
+    // validate and remove improperly configured components
+    validateConfiguration();
+
+  }
+  /**
+   * Creates a populated Flume Configuration object.
+   */
+  public FlumeConfiguration(Map<String, String> properties) {
+    agentConfigMap = new HashMap<String, AgentConfiguration>();
+    errors = new LinkedList<FlumeConfigurationError>();
+    // Construct the in-memory component hierarchy
+    for(String name : properties.keySet()) {
+      String value = properties.get(name);
 
       if (!addRawProperty(name, value)) {
         logger.warn("Configuration property ignored: " + name + " = " + value);
@@ -119,7 +137,7 @@ public class FlumeConfiguration {
       logger.debug("Sources " + aconf.sources + "\n");
     }
 
-    logger.info("Post-validation flume configuration contains configuration "
+    logger.info("Post-validation flume configuration contains configuration"
         + " for agents: " + agentConfigMap.keySet());
   }
 
@@ -466,7 +484,7 @@ public class FlumeConfiguration {
             if (conf != null) errorList.addAll(conf.getErrors());
             iter.remove();
             logger.warn("Could not configure channel " + channelName
-                + ". Skipping it");
+                + " due to: " + e.getMessage(), e);
 
           }
         } else {
@@ -568,7 +586,8 @@ public class FlumeConfiguration {
           } catch (ConfigurationException e) {
             if (srcConf != null) errorList.addAll(srcConf.getErrors());
             iter.remove();
-            logger.warn("Removed " + sourceName + " due to " + e.getMessage());
+            logger.warn("Could not configure source  " + sourceName
+                + " due to: " + e.getMessage(), e);
           }
         } else {
           iter.remove();
@@ -675,8 +694,8 @@ public class FlumeConfiguration {
           } catch (ConfigurationException e) {
             iter.remove();
             if (sinkConf != null) errorList.addAll(sinkConf.getErrors());
-            logger.warn("Configuration for : " + sinkName
-                    + " has errors, and will be removed: ", e);
+            logger.warn("Could not configure sink  " + sinkName
+                + " due to: " + e.getMessage(), e);
           }
         }
         // Filter out any sinks that have invalid channel
@@ -733,7 +752,7 @@ public class FlumeConfiguration {
               if (conf != null) errorList.addAll(conf.getErrors());
               throw new ConfigurationException(
                   "No available sinks for sinkgroup: " + sinkgroupName
-                  + ". " + "Sinkgroup will be removed");
+                  + ". Sinkgroup will be removed");
             }
 
           } catch (ConfigurationException e) {
@@ -742,9 +761,8 @@ public class FlumeConfiguration {
             .add(new FlumeConfigurationError(agentName, sinkgroupName,
                 FlumeConfigurationErrorType.CONFIG_ERROR,
                 ErrorOrWarning.ERROR));
-            logger.warn("Configuration error for: " + sinkgroupName
-                + ".Removed.");
-
+            logger.warn("Could not configure sink group " + sinkgroupName
+                + " due to: " + e.getMessage(), e);
           }
         } else {
           iter.remove();

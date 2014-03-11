@@ -21,9 +21,14 @@ package org.apache.flume.serialization;
 import com.google.common.base.Preconditions;
 import java.io.OutputStream;
 import org.apache.flume.Context;
+import org.apache.flume.FlumeException;
+import org.apache.flume.annotations.InterfaceAudience;
+import org.apache.flume.annotations.InterfaceStability;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+@InterfaceAudience.Private
+@InterfaceStability.Stable
 public class EventSerializerFactory {
 
   private static final Logger logger =
@@ -53,12 +58,14 @@ public class EventSerializerFactory {
         if (c != null && EventSerializer.Builder.class.isAssignableFrom(c)) {
           builderClass = (Class<? extends EventSerializer.Builder>) c;
         } else {
-          logger.error("Unable to instantiate Builder from {}", serializerType);
-          return null;
+          String errMessage = "Unable to instantiate Builder from " +
+              serializerType + ": does not appear to implement " +
+              EventSerializer.Builder.class.getName();
+          throw new FlumeException(errMessage);
         }
       } catch (ClassNotFoundException ex) {
         logger.error("Class not found: " + serializerType, ex);
-        return null;
+        throw new FlumeException(ex);
       }
     }
 
@@ -67,11 +74,13 @@ public class EventSerializerFactory {
     try {
       builder = builderClass.newInstance();
     } catch (InstantiationException ex) {
-      logger.error("Cannot instantiate builder: " + serializerType, ex);
-      return null;
+      String errMessage = "Cannot instantiate builder: " + serializerType;
+      logger.error(errMessage, ex);
+      throw new FlumeException(errMessage, ex);
     } catch (IllegalAccessException ex) {
-      logger.error("Cannot instantiate builder: " + serializerType, ex);
-      return null;
+      String errMessage = "Cannot instantiate builder: " + serializerType;
+      logger.error(errMessage, ex);
+      throw new FlumeException(errMessage, ex);
     }
 
     return builder.build(context, out);

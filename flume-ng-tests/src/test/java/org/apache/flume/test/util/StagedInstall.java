@@ -26,13 +26,20 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.Socket;
+import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+import java.util.concurrent.TimeUnit;
 import java.util.zip.GZIPInputStream;
 
+import com.google.common.base.Preconditions;
+import com.google.common.io.Files;
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
 import org.apache.commons.compress.archivers.tar.TarArchiveInputStream;
 import org.apache.log4j.Logger;
+
+import com.google.common.base.Joiner;
+import com.google.common.collect.ImmutableList;
 
 
 /**
@@ -58,10 +65,12 @@ public class StagedInstall {
   private final String logDirPath;
 
   // State per invocation - config file, process, shutdown hook
+  private String agentName;
   private String configFilePath;
   private Process process;
   private ProcessShutdownHook shutdownHook;
   private ProcessInputStreamConsumer consumer;
+  private String agentClasspath;
 
   private static StagedInstall INSTANCE;
 
@@ -87,6 +96,7 @@ public class StagedInstall {
     consumer.interrupt();
     consumer = null;
     configFilePath = null;
+    agentClasspath = null;
     Runtime.getRuntime().removeShutdownHook(shutdownHook);
     shutdownHook = null;
 
@@ -107,35 +117,43 @@ public class StagedInstall {
 
   public synchronized void startAgent(String name, Properties properties)
       throws Exception {
+    Preconditions.checkArgument(!name.isEmpty(), "agent name must not be empty");
+    Preconditions.checkNotNull(properties, "properties object must not be null");
+
+    agentName = name;
+
     if (process != null) {
       throw new Exception("A process is already running");
     }
-    LOGGER.info("Starting process for agent: " + name + " using config: "
+    LOGGER.info("Starting process for agent: " + agentName + " using config: "
        + properties);
 
-    File configFile = createConfigurationFile(name, properties);
+    File configFile = createConfigurationFile(agentName, properties);
     configFilePath = configFile.getCanonicalPath();
 
     String configFileName = configFile.getName();
-    String logFileName = "flume-" + name + "-"
+    String logFileName = "flume-" + agentName + "-"
         + configFileName.substring(0, configFileName.indexOf('.')) + ".log";
 
     LOGGER.info("Created configuration file: " + configFilePath);
 
-    String[] cmdArgs = {
-        launchScriptPath, "agent", "-n", name, "-f", configFilePath,
-        "-c", confDirPath,
-        "-D" + ENV_FLUME_LOG_DIR + "=" + logDirPath,
-        "-D" + ENV_FLUME_ROOT_LOGGER + "=" + ENV_FLUME_ROOT_LOGGER_VALUE,
-        "-D" + ENV_FLUME_LOG_FILE + "=" + logFileName
-    };
-
-    StringBuilder sb = new StringBuilder("");
-    for (String cmdArg : cmdArgs) {
-      sb.append(cmdArg).append(" ");
+    ImmutableList.Builder<String> builder = new ImmutableList.Builder<String>();
+    builder.add(launchScriptPath);
+    builder.add("agent");
+    builder.add("--conf", confDirPath);
+    if (agentClasspath != null) {
+        builder.add("--classpath", agentClasspath);
     }
+    builder.add("--conf-file", configFilePath);
+    builder.add("--name", agentName);
+    builder.add("-D" + ENV_FLUME_LOG_DIR + "=" + logDirPath);
+    builder.add("-D" + ENV_FLUME_ROOT_LOGGER + "="
+            + ENV_FLUME_ROOT_LOGGER_VALUE);
+    builder.add("-D" + ENV_FLUME_LOG_FILE + "=" + logFileName);
 
-    LOGGER.info("Using command: " + sb.toString());
+    List<String> cmdArgs = builder.build();
+
+    LOGGER.info("Using command: " + Joiner.on(" ").join(cmdArgs));
 
     ProcessBuilder pb = new ProcessBuilder(cmdArgs);
 
@@ -155,8 +173,25 @@ public class StagedInstall {
     Thread.sleep(3000); // sleep for 3s to let system initialize
   }
 
+  public synchronized void setAgentClasspath(String agentClasspath) {
+      this.agentClasspath = agentClasspath;
+  }
+
+  public synchronized void reconfigure(Properties properties) throws Exception {
+    File configFile = createConfigurationFile(agentName, properties);
+    Files.copy(configFile, new File(configFilePath));
+    configFile.delete();
+    LOGGER.info("Updated agent config file: " + configFilePath);
+  }
+
+  public synchronized File getStageDir() {
+    return stageDir;
+  }
+
   private File createConfigurationFile(String agentName, Properties properties)
       throws Exception {
+    Preconditions.checkNotNull(properties, "properties object must not be null");
+
     File file = File.createTempFile("agent", "config.properties", stageDir);
 
     OutputStream os = null;
@@ -315,7 +350,7 @@ public class StagedInstall {
     try {
       tarballInputStream = new GZIPInputStream(
           new FileInputStream(tarballFile));
-      File temp2File = File.createTempFile("flume", "-dist", destDir);
+      File temp2File = File.createTempFile("flume", "-bin", destDir);
       String temp2FilePath = temp2File.getCanonicalPath();
       temp2File.delete();
 
@@ -394,7 +429,7 @@ public class StagedInstall {
           public boolean accept(File pathname) {
             String name = pathname.getName();
             if (name != null && name.startsWith("apache-flume-")
-                && name.endsWith("-dist.tar.gz")) {
+                && name.endsWith("-bin.tar.gz")) {
               return true;
             }
             return false;

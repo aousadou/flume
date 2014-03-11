@@ -18,10 +18,8 @@
  */
 package org.apache.flume.sink;
 
-import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Random;
 
 import org.apache.flume.Context;
 import org.apache.flume.EventDeliveryException;
@@ -30,11 +28,13 @@ import org.apache.flume.Sink;
 import org.apache.flume.Sink.Status;
 import org.apache.flume.conf.Configurable;
 import org.apache.flume.lifecycle.LifecycleAware;
-import org.apache.flume.util.SpecificOrderIterator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.google.common.base.Preconditions;
+import org.apache.flume.util.OrderSelector;
+import org.apache.flume.util.RandomOrderSelector;
+import org.apache.flume.util.RoundRobinOrderSelector;
 
 /**
  * <p>Provides the ability to load-balance flow over multiple sinks.</p>
@@ -78,13 +78,14 @@ import com.google.common.base.Preconditions;
  * @see LoadBalancingSinkProcessor.SinkSelector
  */
 public class LoadBalancingSinkProcessor extends AbstractSinkProcessor {
-
   public static final String CONFIG_SELECTOR = "selector";
   public static final String CONFIG_SELECTOR_PREFIX = CONFIG_SELECTOR + ".";
+  public static final String CONFIG_BACKOFF = "backoff";
 
   public static final String SELECTOR_NAME_ROUND_ROBIN = "ROUND_ROBIN";
   public static final String SELECTOR_NAME_RANDOM = "RANDOM";
-
+  public static final String SELECTOR_NAME_ROUND_ROBIN_BACKOFF = "ROUND_ROBIN_BACKOFF";
+  public static final String SELECTOR_NAME_RANDOM_BACKOFF = "RANDOM_BACKOFF";
 
   private static final Logger LOGGER = LoggerFactory
       .getLogger(LoadBalancingSinkProcessor.class);
@@ -100,12 +101,14 @@ public class LoadBalancingSinkProcessor extends AbstractSinkProcessor {
     String selectorTypeName = context.getString(CONFIG_SELECTOR,
         SELECTOR_NAME_ROUND_ROBIN);
 
+    Boolean shouldBackOff = context.getBoolean(CONFIG_BACKOFF, false);
+
     selector = null;
 
     if (selectorTypeName.equalsIgnoreCase(SELECTOR_NAME_ROUND_ROBIN)) {
-      selector = new RoundRobinSinkSelector();
+      selector = new RoundRobinSinkSelector(shouldBackOff);
     } else if (selectorTypeName.equalsIgnoreCase(SELECTOR_NAME_RANDOM)) {
-      selector = new RandomOrderSinkSelector();
+      selector = new RandomOrderSinkSelector(shouldBackOff);
     } else {
       try {
         @SuppressWarnings("unchecked")
@@ -151,6 +154,7 @@ public class LoadBalancingSinkProcessor extends AbstractSinkProcessor {
         status = sink.process();
         break;
       } catch (Exception ex) {
+        selector.informSinkFailed(sink);
         LOGGER.warn("Sink failed to consume event. "
             + "Attempting next sink if available.", ex);
       }
@@ -191,33 +195,46 @@ public class LoadBalancingSinkProcessor extends AbstractSinkProcessor {
     void setSinks(List<Sink> sinks);
 
     Iterator<Sink> createSinkIterator();
+
+    void informSinkFailed(Sink failedSink);
   }
 
   /**
    * A sink selector that implements the round-robin sink selection policy.
    * This implementation is not MT safe.
    */
+  //Unfortunately both implementations need to override the base implementation
+  //in AbstractSinkSelector class, because any custom sink selectors
+  //will break if this stuff is moved to that class.
   private static class RoundRobinSinkSelector extends AbstractSinkSelector {
 
-    private int nextHead = 0;
+    private OrderSelector<Sink> selector;
+    RoundRobinSinkSelector(boolean backoff){
+      selector = new RoundRobinOrderSelector<Sink>(backoff);
+    }
 
     @Override
-    public Iterator<Sink> createSinkIterator() {
-
-      int size = getSinks().size();
-      int[] indexOrder = new int[size];
-
-      int begin = nextHead++;
-      if (nextHead == size) {
-        nextHead = 0;
+    public void configure(Context context){
+      super.configure(context);
+      if (maxTimeOut != 0) {
+        selector.setMaxTimeOut(maxTimeOut);
       }
-
-      for (int i=0; i < size; i++) {
-        indexOrder[i] = (begin + i)%size;
-      }
-
-      return new SpecificOrderIterator<Sink>(indexOrder, getSinks());
     }
+    @Override
+    public Iterator<Sink> createSinkIterator() {
+      return selector.createIterator();
+    }
+
+    @Override
+    public void setSinks(List<Sink> sinks) {
+      selector.setObjects(sinks);
+    }
+
+    @Override
+    public void informSinkFailed(Sink failedSink) {
+      selector.informFailure(failedSink);
+    }
+
   }
 
   /**
@@ -226,26 +243,33 @@ public class LoadBalancingSinkProcessor extends AbstractSinkProcessor {
    */
   private static class RandomOrderSinkSelector extends AbstractSinkSelector {
 
-    private Random random = new Random(System.currentTimeMillis());
+    private OrderSelector<Sink> selector;
+
+    RandomOrderSinkSelector(boolean backoff){
+      selector = new RandomOrderSelector<Sink>(backoff);
+    }
+
+    @Override
+    public void configure(Context context) {
+      super.configure(context);
+      if (maxTimeOut != 0) {
+        selector.setMaxTimeOut(maxTimeOut);
+      }
+    }
+
+    @Override
+    public void setSinks(List<Sink> sinks) {
+      selector.setObjects(sinks);
+    }
 
     @Override
     public Iterator<Sink> createSinkIterator() {
-      int size = getSinks().size();
-      int[] indexOrder = new int[size];
+      return selector.createIterator();
+    }
 
-      List<Integer> indexList = new ArrayList<Integer>();
-      for (int i=0; i<size; i++) {
-        indexList.add(i);
-      }
-
-      while (indexList.size() != 1) {
-        int pick = random.nextInt(indexList.size());
-        indexOrder[indexList.size() - 1] = indexList.remove(pick);
-      }
-
-      indexOrder[0] = indexList.get(0);
-
-      return new SpecificOrderIterator<Sink>(indexOrder, getSinks());
+    @Override
+    public void informSinkFailed(Sink failedSink) {
+      selector.informFailure(failedSink);
     }
   }
 }

@@ -18,6 +18,7 @@
  */
 package org.apache.flume.source;
 
+
 public class ExecSourceConfigurationConstants {
 
   /**
@@ -43,4 +44,22 @@ public class ExecSourceConfigurationConstants {
    */
   public static final String CONFIG_BATCH_SIZE = "batchSize";
   public static final int DEFAULT_BATCH_SIZE = 20;
+
+  /**
+   * Amount of time to wait, if the buffer size was not reached, before 
+   * to data is pushed downstream: : default 3000 ms
+   */
+  public static final String CONFIG_BATCH_TIME_OUT = "batchTimeout";
+  public static final long DEFAULT_BATCH_TIME_OUT = 3000l;
+
+  /**
+   * Charset for reading input
+   */
+  public static final String CHARSET = "charset";
+  public static final String DEFAULT_CHARSET = "UTF-8";
+
+  /**
+   * Optional shell/command processor used to run command
+   */
+  public static final String CONFIG_SHELL = "shell";
 }
