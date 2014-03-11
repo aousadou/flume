@@ -255,13 +255,13 @@ public class TwitterSource
 
     addString(doc, "source", status.getSource());
     addString(doc, "text", status.getText());
-    addString(doc, "lang", status.getLang());
 
     MediaEntity[] mediaEntities = status.getMediaEntities();
     if (mediaEntities.length > 0) {
       addString(doc, "media_url_https", mediaEntities[0].getMediaURLHttps());
       addString(doc, "expanded_url", mediaEntities[0].getExpandedURL());
     }
+    addString(doc, "lang", status.getLang());
 
     doc.put("user_friends_count", user.getFriendsCount());
     doc.put("user_statuses_count", user.getStatusesCount());
