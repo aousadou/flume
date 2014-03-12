@@ -187,58 +187,64 @@ public class TwitterSource
   private Schema createAvroSchema() {
     Schema avroSchema = Schema.createRecord("Doc", "adoc", null, false);
     List<Field> fields = new ArrayList<Field>();
-    fields.add(new Field("id", Schema.create(Type.STRING), null, null));
-    fields.add(new Field("user_friends_count",
-                         createOptional(Schema.create(Type.INT)),
-                         null, null));
-    fields.add(new Field("user_location",
-                         createOptional(Schema.create(Type.STRING)),
-                         null, null));
-    fields.add(new Field("user_description",
-                         createOptional(Schema.create(Type.STRING)),
-                         null, null));
-    fields.add(new Field("user_statuses_count",
-                         createOptional(Schema.create(Type.INT)),
-                         null, null));
-    fields.add(new Field("user_followers_count",
-                         createOptional(Schema.create(Type.INT)),
-                         null, null));
-    fields.add(new Field("user_name",
-                         createOptional(Schema.create(Type.STRING)),
-                         null, null));
-    fields.add(new Field("user_screen_name",
-                         createOptional(Schema.create(Type.STRING)),
-                         null, null));
-    fields.add(new Field("created_at",
-                         createOptional(Schema.create(Type.STRING)),
-                         null, null));
-    fields.add(new Field("text",
-                         createOptional(Schema.create(Type.STRING)),
-                         null, null));
-    fields.add(new Field("lang",
-                         createOptional(Schema.create(Type.STRING)),
-                         null, null));
-    fields.add(new Field("retweet_count",
-                         createOptional(Schema.create(Type.INT)),
-                         null, null));
-    fields.add(new Field("retweeted",
-                         createOptional(Schema.create(Type.BOOLEAN)),
-                         null, null));
-    fields.add(new Field("in_reply_to_user_id",
-                         createOptional(Schema.create(Type.LONG)),
-                         null, null));
-    fields.add(new Field("source",
-                         createOptional(Schema.create(Type.STRING)),
-                         null, null));
-    fields.add(new Field("in_reply_to_status_id",
-                         createOptional(Schema.create(Type.LONG)),
-                         null, null));
-    fields.add(new Field("media_url_https",
-                         createOptional(Schema.create(Type.STRING)),
-                         null, null));
-    fields.add(new Field("expanded_url",
-                         createOptional(Schema.create(Type.STRING)),
-                         null, null));
+    fields.add(new Field("id", Schema.create(Type.LONG), null, null));
+    fields.add(new Field("created_at", createOptional(Schema.create(Type.STRING)), null, null));
+    fields.add(new Field("retweet_count", createOptional(Schema.create(Type.INT)), null, null));
+    fields.add(new Field("retweeted", createOptional(Schema.create(Type.BOOLEAN)), null, null));
+    fields.add(new Field("in_reply_to_user_id", createOptional(Schema.create(Type.LONG)),
+        null, null));
+    fields.add(new Field("in_reply_to_status_id", createOptional(Schema.create(Type.LONG)),
+        null, null));
+    fields.add(new Field("geolocation_latitude", createOptional(Schema.create(Type.DOUBLE)),
+        null, null));
+    fields.add(new Field("geolocation_longitude", createOptional(Schema.create(Type.DOUBLE)),
+        null, null));
+    fields.add(new Field("favorite_count", createOptional(Schema.create(Type.INT)),
+        null, null));
+    fields.add(new Field("is_possibly_sensitive", createOptional(Schema.create(Type.BOOLEAN)),
+        null, null));
+    fields.add(new Field("is_favorited", createOptional(Schema.create(Type.BOOLEAN)),
+        null, null));
+    fields.add(new Field("is_truncated", createOptional(Schema.create(Type.BOOLEAN)),
+        null, null));
+
+    fields.add(new Field("source", createOptional(Schema.create(Type.STRING)), null, null));
+    fields.add(new Field("text", createOptional(Schema.create(Type.STRING)), null, null));
+    fields.add(new Field("lang", createOptional(Schema.create(Type.STRING)), null, null));
+
+    fields.add(new Field("media_url_https", createOptional(Schema.create(Type.STRING)), null, null));
+    fields.add(new Field("expanded_url", createOptional(Schema.create(Type.STRING)), null, null));
+
+    fields.add(new Field("user_id", createOptional(Schema.create(Type.LONG)), null, null));
+    fields.add(new Field("user_friends_count", createOptional(Schema.create(Type.INT)), null, null));
+    fields.add(new Field("user_statuses_count",createOptional(Schema.create(Type.INT)), null, null));
+    fields.add(new Field("user_followers_count", createOptional(Schema.create(Type.INT)), null, null));
+    fields.add(new Field("user_created_at", createOptional(Schema.create(Type.STRING)), null, null));
+    fields.add(new Field("user_location", createOptional(Schema.create(Type.STRING)), null, null));
+    fields.add(new Field("user_description", createOptional(Schema.create(Type.STRING)), null, null));
+    fields.add(new Field("user_screen_name", createOptional(Schema.create(Type.STRING)), null, null));
+    fields.add(new Field("user_name", createOptional(Schema.create(Type.STRING)), null, null));
+    fields.add(new Field("user_screen_name", createOptional(Schema.create(Type.STRING)), null, null));
+    fields.add(new Field("user_timezone", createOptional(Schema.create(Type.STRING)), null, null));
+
+    fields.add(new Field("place_id", createOptional(Schema.create(Type.STRING)), null, null));
+    fields.add(new Field("place_country", createOptional(Schema.create(Type.STRING)), null, null));
+    fields.add(new Field("place_countrycode", createOptional(Schema.create(Type.STRING)), null, null));
+    fields.add(new Field("place_name", createOptional(Schema.create(Type.STRING)), null, null));
+    fields.add(new Field("place_placetype", createOptional(Schema.create(Type.STRING)), null, null));
+    fields.add(new Field("place_streetadress", createOptional(Schema.create(Type.STRING)), null, null));
+
+    Schema user_mention = Schema.createRecord("UserMentionEntity", "doc", null, false);
+    List<Field> user_mention_fields = new ArrayList<Field>();
+    user_mention_fields.add(new Field("text", createOptional(Schema.create(Type.STRING)), null, null));
+    user_mention_fields.add(new Field("name", createOptional(Schema.create(Type.STRING)), null, null));
+    user_mention_fields.add(new Field("screenName", createOptional(Schema.create(Type.STRING)), null, null));
+    user_mention_fields.add(new Field("id", createOptional(Schema.create(Type.LONG)), null, null));
+    user_mention_fields.add(new Field("start", createOptional(Schema.create(Type.INT)), null, null));
+    user_mention_fields.add(new Field("end", createOptional(Schema.create(Type.INT)), null, null));
+    user_mention.setFields(user_mention_fields);
+    fields.add(new Field("user_mentions", createOptional(Schema.createArray(user_mention)), null, null));
+
     avroSchema.setFields(fields);
     return avroSchema;
   }
@@ -253,6 +259,12 @@ public class TwitterSource
     doc.put("retweeted", status.isRetweet());
     doc.put("in_reply_to_user_id", status.getInReplyToUserId());
     doc.put("in_reply_to_status_id", status.getInReplyToStatusId());
+    doc.put("geolocation_latitude", status.getGeoLocation().getLatitude());
+    doc.put("geolocation_longitude", status.getGeoLocation().getLongitude());
+    doc.put("favorite_count", status.getFavoriteCount());
+    doc.put("is_possibly_sensitive", status.isPossiblySensitive());
+    doc.put("is_favorited", status.isFavorited());
+    doc.put("is_truncated", status.isTruncated());
 
     addString(doc, "source", status.getSource());
     addString(doc, "text", status.getText());
@@ -264,13 +276,25 @@ public class TwitterSource
       addString(doc, "expanded_url", mediaEntities[0].getExpandedURL());
     }
 
+    doc.put("user_id", user.getId());
     doc.put("user_friends_count", user.getFriendsCount());
     doc.put("user_statuses_count", user.getStatusesCount());
     doc.put("user_followers_count", user.getFollowersCount());
+    doc.put("user_created_at", formatterTo.format(user.getCreatedAt()));
     addString(doc, "user_location", user.getLocation());
     addString(doc, "user_description", user.getDescription());
     addString(doc, "user_screen_name", user.getScreenName());
     addString(doc, "user_name", user.getName());
+    addString(doc, "user_timezone", user.getTimeZone());
+
+    addString(doc, "place_id", status.getPlace().getId());
+    addString(doc, "place_country", status.getPlace().getCountry());
+    addString(doc, "place_countrycode", status.getPlace().getCountryCode());
+    addString(doc, "place_name", status.getPlace().getName());
+    addString(doc, "place_placetype", status.getPlace().getPlaceType());
+    addString(doc, "place_streetadress", status.getPlace().getStreetAddress());
+
+    doc.put("user_mentions", status.getUserMentionEntities());
 
     return doc;
   }
