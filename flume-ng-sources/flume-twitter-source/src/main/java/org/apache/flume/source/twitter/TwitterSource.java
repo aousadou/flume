@@ -154,7 +154,7 @@ public class TwitterSource
   }
 
   public void onStatus(Status status)  {
-    Record doc = extractRecord("", avroSchema, status);
+    Record doc = extractRecord(avroSchema, status);
     LOGGER.info("Extracted record is : "  + doc.toString());
     if (doc == null) {
       return; // skip
@@ -249,11 +249,11 @@ public class TwitterSource
     return avroSchema;
   }
 
-  private Record extractRecord(String idPrefix, Schema avroSchema, Status status) {
+  private Record extractRecord(Schema avroSchema, Status status) {
     User user = status.getUser();
     Record doc = new Record(avroSchema);
 
-    doc.put("id", idPrefix + status.getId());
+    doc.put("id", status.getId());
     doc.put("created_at", formatterTo.format(status.getCreatedAt()));
     doc.put("retweet_count", status.getRetweetCount());
     doc.put("retweeted", status.isRetweet());
