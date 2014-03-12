@@ -311,8 +311,7 @@ public class TwitterSource
   }
 
   private Schema createOptional(Schema schema) {
-    return Schema.createUnion(Arrays.asList(
-        new Schema[] { schema, Schema.create(Type.NULL) }));
+    return Schema.createUnion(Arrays.asList(schema, Schema.create(Type.NULL)));
   }
 
   private void addString(Record doc, String avroField, String val) {
