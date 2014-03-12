@@ -96,6 +96,8 @@ public class TwitterSource
   private static final Logger LOGGER =
       LoggerFactory.getLogger(TwitterSource.class);
 
+  private Schema user_mention;
+
   public TwitterSource() {
   }
 
@@ -235,7 +237,7 @@ public class TwitterSource
     fields.add(new Field("place_placetype", createOptional(Schema.create(Type.STRING)), null, null));
     fields.add(new Field("place_streetadress", createOptional(Schema.create(Type.STRING)), null, null));
 
-    Schema user_mention = Schema.createRecord("UserMentionEntity", "doc", null, false);
+    this.user_mention = Schema.createRecord("UserMentionEntity", "doc", null, false);
     List<Field> user_mention_fields = new ArrayList<Field>();
     user_mention_fields.add(new Field("name", createOptional(Schema.create(Type.STRING)), null, null));
     user_mention_fields.add(new Field("screenName", createOptional(Schema.create(Type.STRING)), null, null));
@@ -299,7 +301,7 @@ public class TwitterSource
     List<Record> user_mentions = new ArrayList<Record>();
     if (status.getUserMentionEntities() != null && status.getUserMentionEntities().length > 0) {
       for (UserMentionEntity userMention : status.getUserMentionEntities()) {
-        Record userMentionRecord = new Record(avroSchema.getField("UserMentionEntity").schema());
+        Record userMentionRecord = new Record(user_mention);
         userMentionRecord.put("id", userMention.getId());
         userMentionRecord.put("name", userMention.getName());
         userMentionRecord.put("screenName", userMention.getScreenName());
