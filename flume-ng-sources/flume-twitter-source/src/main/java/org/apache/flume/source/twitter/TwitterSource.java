@@ -259,8 +259,10 @@ public class TwitterSource
     doc.put("retweeted", status.isRetweet());
     doc.put("in_reply_to_user_id", status.getInReplyToUserId());
     doc.put("in_reply_to_status_id", status.getInReplyToStatusId());
-    doc.put("geolocation_latitude", status.getGeoLocation().getLatitude());
-    doc.put("geolocation_longitude", status.getGeoLocation().getLongitude());
+    if (status.getGeoLocation() != null) {
+      doc.put("geolocation_latitude", status.getGeoLocation().getLatitude());
+      doc.put("geolocation_longitude", status.getGeoLocation().getLongitude());
+    }
     doc.put("favorite_count", status.getFavoriteCount());
     doc.put("is_possibly_sensitive", status.isPossiblySensitive());
     doc.put("is_favorited", status.isFavorited());
