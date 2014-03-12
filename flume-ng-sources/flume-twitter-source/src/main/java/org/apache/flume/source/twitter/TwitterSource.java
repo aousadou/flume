@@ -43,6 +43,7 @@ import twitter4j.StatusListener;
 import twitter4j.TwitterStream;
 import twitter4j.TwitterStreamFactory;
 import twitter4j.User;
+import twitter4j.UserMentionEntity;
 import twitter4j.auth.AccessToken;
 
 import java.io.ByteArrayOutputStream;
@@ -236,12 +237,9 @@ public class TwitterSource
 
     Schema user_mention = Schema.createRecord("UserMentionEntity", "doc", null, false);
     List<Field> user_mention_fields = new ArrayList<Field>();
-    user_mention_fields.add(new Field("text", createOptional(Schema.create(Type.STRING)), null, null));
     user_mention_fields.add(new Field("name", createOptional(Schema.create(Type.STRING)), null, null));
     user_mention_fields.add(new Field("screenName", createOptional(Schema.create(Type.STRING)), null, null));
     user_mention_fields.add(new Field("id", createOptional(Schema.create(Type.LONG)), null, null));
-    user_mention_fields.add(new Field("start", createOptional(Schema.create(Type.INT)), null, null));
-    user_mention_fields.add(new Field("end", createOptional(Schema.create(Type.INT)), null, null));
     user_mention.setFields(user_mention_fields);
     fields.add(new Field("user_mentions", createOptional(Schema.createArray(user_mention)), null, null));
 
@@ -298,8 +296,16 @@ public class TwitterSource
       addString(doc, "place_streetadress", status.getPlace().getStreetAddress());
     }
 
+    List<Record> user_mentions = new ArrayList<Record>();
     if (status.getUserMentionEntities() != null && status.getUserMentionEntities().length > 0) {
-      doc.put("user_mentions", status.getUserMentionEntities());
+      for (UserMentionEntity userMention : status.getUserMentionEntities()) {
+        Record userMentionRecord = new Record(avroSchema.getField("UserMentionEntity").schema());
+        userMentionRecord.put("id", userMention.getId());
+        userMentionRecord.put("name", userMention.getName());
+        userMentionRecord.put("screenName", userMention.getScreenName());
+        user_mentions.add(userMentionRecord);
+      }
+      doc.put("user_mentions", user_mentions);
     }
 
     return doc;
