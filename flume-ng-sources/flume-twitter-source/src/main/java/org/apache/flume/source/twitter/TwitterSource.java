@@ -289,14 +289,18 @@ public class TwitterSource
     addString(doc, "user_name", user.getName());
     addString(doc, "user_timezone", user.getTimeZone());
 
-    addString(doc, "place_id", status.getPlace().getId());
-    addString(doc, "place_country", status.getPlace().getCountry());
-    addString(doc, "place_countrycode", status.getPlace().getCountryCode());
-    addString(doc, "place_name", status.getPlace().getName());
-    addString(doc, "place_placetype", status.getPlace().getPlaceType());
-    addString(doc, "place_streetadress", status.getPlace().getStreetAddress());
+    if (status.getPlace() != null) {
+      addString(doc, "place_id", status.getPlace().getId());
+      addString(doc, "place_country", status.getPlace().getCountry());
+      addString(doc, "place_countrycode", status.getPlace().getCountryCode());
+      addString(doc, "place_name", status.getPlace().getName());
+      addString(doc, "place_placetype", status.getPlace().getPlaceType());
+      addString(doc, "place_streetadress", status.getPlace().getStreetAddress());
+    }
 
-    doc.put("user_mentions", status.getUserMentionEntities());
+    if (status.getUserMentionEntities() != null && status.getUserMentionEntities().length > 0) {
+      doc.put("user_mentions", status.getUserMentionEntities());
+    }
 
     return doc;
   }
