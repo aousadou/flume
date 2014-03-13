@@ -35,6 +35,8 @@ import org.apache.flume.event.EventBuilder;
 import org.apache.flume.source.AbstractSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import twitter4j.DirectMessage;
+import twitter4j.FilterQuery;
 import twitter4j.MediaEntity;
 import twitter4j.StallWarning;
 import twitter4j.Status;
@@ -43,7 +45,9 @@ import twitter4j.StatusListener;
 import twitter4j.TwitterStream;
 import twitter4j.TwitterStreamFactory;
 import twitter4j.User;
+import twitter4j.UserList;
 import twitter4j.UserMentionEntity;
+import twitter4j.UserStreamListener;
 import twitter4j.auth.AccessToken;
 
 import java.io.ByteArrayOutputStream;
@@ -67,7 +71,7 @@ import java.util.List;
 @InterfaceStability.Unstable
 public class TwitterSource
     extends AbstractSource
-    implements EventDrivenSource, Configurable, StatusListener {
+    implements EventDrivenSource, Configurable, StatusListener, UserStreamListener {
 
   private TwitterStream twitterStream;
   private Schema avroSchema;
@@ -97,12 +101,22 @@ public class TwitterSource
       LoggerFactory.getLogger(TwitterSource.class);
 
   private Schema user_mention;
+  private Boolean listenMyAccount;
+  private String[] hashtags = null;
+  private String listenHashtags;
 
   public TwitterSource() {
   }
 
   @Override
   public void configure(Context context) {
+    this.listenMyAccount = context.getBoolean("listenMyAccount", false);
+    this.listenHashtags = context.getString("listenHashtags");
+
+    if (listenHashtags != null) {
+      this.hashtags = listenHashtags.split(",");
+    }
+
     String consumerKey = context.getString("consumerKey");
     String consumerSecret = context.getString("consumerSecret");
     String accessToken = context.getString("accessToken");
@@ -136,9 +150,22 @@ public class TwitterSource
     totalTextIndexed = 0;
     skippedDocs = 0;
     batchEndTime = System.currentTimeMillis() + maxBatchDurationMillis;
-    twitterStream.sample();
-    //
-    // twitterStream.firehose(0);
+
+    if (listenMyAccount) {
+      if (hashtags != null) {
+        LOGGER.info("Listen tweets visible by your account with hashtags : " + listenHashtags);
+        twitterStream.user(hashtags);
+      } else {
+        LOGGER.info("Listen all tweets visible by your account");
+        twitterStream.user();
+      }
+    } else if (hashtags != null) {
+      twitterStream.filter(new FilterQuery(0, null, hashtags));
+    } else {
+      LOGGER.info("Listen all tweets");
+      twitterStream.sample();
+    }
+
     LOGGER.info("Twitter source {} started.", getName());
     // This should happen at the end of the start method, since this will 
     // change the lifecycle status of the component to tell the Flume 
@@ -372,5 +399,85 @@ public class TwitterSource
 
   public void onException(Exception e) {
     LOGGER.error("Exception while streaming tweets", e);
+  }
+
+  @Override
+  public void onDeletionNotice(long directMessageId, long userId) {
+
+  }
+
+  @Override
+  public void onFriendList(long[] friendIds) {
+
+  }
+
+  @Override
+  public void onFavorite(User source, User target, Status favoritedStatus) {
+
+  }
+
+  @Override
+  public void onUnfavorite(User source, User target, Status unfavoritedStatus) {
+
+  }
+
+  @Override
+  public void onFollow(User source, User followedUser) {
+
+  }
+
+  @Override
+  public void onDirectMessage(DirectMessage directMessage) {
+
+  }
+
+  @Override
+  public void onUserListMemberAddition(User addedMember, User listOwner, UserList list) {
+
+  }
+
+  @Override
+  public void onUserListMemberDeletion(User deletedMember, User listOwner, UserList list) {
+
+  }
+
+  @Override
+  public void onUserListSubscription(User subscriber, User listOwner, UserList list) {
+
+  }
+
+  @Override
+  public void onUserListUnsubscription(User subscriber, User listOwner, UserList list) {
+
+  }
+
+  @Override
+  public void onUserListCreation(User listOwner, UserList list) {
+
+  }
+
+  @Override
+  public void onUserListUpdate(User listOwner, UserList list) {
+
+  }
+
+  @Override
+  public void onUserListDeletion(User listOwner, UserList list) {
+
+  }
+
+  @Override
+  public void onUserProfileUpdate(User updatedUser) {
+
+  }
+
+  @Override
+  public void onBlock(User source, User blockedUser) {
+
+  }
+
+  @Override
+  public void onUnblock(User source, User unblockedUser) {
+
   }
 }
