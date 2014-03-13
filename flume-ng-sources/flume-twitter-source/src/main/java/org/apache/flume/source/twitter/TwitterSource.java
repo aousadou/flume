@@ -103,7 +103,9 @@ public class TwitterSource
   private Schema user_mention;
   private Boolean listenMyAccount;
   private String[] hashtags = null;
+  private long[] userIds = null;
   private String listenHashtags;
+  private String listenUsers;
 
   public TwitterSource() {
   }
@@ -112,9 +114,19 @@ public class TwitterSource
   public void configure(Context context) {
     this.listenMyAccount = context.getBoolean("listenMyAccount", false);
     this.listenHashtags = context.getString("listenHashtags");
+    this.listenUsers = context.getString("listenUsers");
 
     if (listenHashtags != null) {
       this.hashtags = listenHashtags.split(",");
+    }
+
+    if (listenUsers != null) {
+      String[] ids = listenUsers.split(",");
+      userIds = new long[ids.length];
+
+      for (int i = 0; i < ids.length; i++) {
+        userIds[i] = Long.parseLong(ids[i]);
+      }
     }
 
     String consumerKey = context.getString("consumerKey");
@@ -159,8 +171,9 @@ public class TwitterSource
         LOGGER.info("Listen all tweets visible by your account");
         twitterStream.user();
       }
-    } else if (hashtags != null) {
-      twitterStream.filter(new FilterQuery(0, null, hashtags));
+    } else if (hashtags != null || userIds != null) {
+      LOGGER.info("Listen all tweets from " + listenUsers + " with hashtags " + listenHashtags);
+      twitterStream.filter(new FilterQuery(0, userIds, hashtags));
     } else {
       LOGGER.info("Listen all tweets");
       twitterStream.sample();
