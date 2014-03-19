@@ -371,7 +371,7 @@ public class TwitterSource
   }
 
   private static void addNumber(Record doc, String avroField, Object val) {
-    if (val instanceof Integer) {
+    /* if (val instanceof Integer) {
       if ((Integer)val == -1) {
         doc.put(avroField, null);
       } else {
@@ -383,9 +383,9 @@ public class TwitterSource
       } else {
         doc.put(avroField, val);
       }
-    } else {
+    } else { */
       doc.put(avroField, val);
-    }
+    // }
   }
 
   private void addString(Record doc, String avroField, String val) {
