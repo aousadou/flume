@@ -297,15 +297,15 @@ public class TwitterSource
 
     doc.put("id", status.getId());
     doc.put("created_at", formatterTo.format(status.getCreatedAt()));
-    doc.put("retweet_count", status.getRetweetCount());
+    addNumber(doc, "retweet_count", status.getRetweetCount());
     doc.put("retweeted", status.isRetweet());
-    doc.put("in_reply_to_user_id", status.getInReplyToUserId());
-    doc.put("in_reply_to_status_id", status.getInReplyToStatusId());
+    addNumber(doc, "in_reply_to_user_id", status.getInReplyToUserId());
+    addNumber(doc, "in_reply_to_status_id", status.getInReplyToStatusId());
     if (status.getGeoLocation() != null) {
       doc.put("geolocation_latitude", status.getGeoLocation().getLatitude());
       doc.put("geolocation_longitude", status.getGeoLocation().getLongitude());
     }
-    doc.put("favorite_count", status.getFavoriteCount());
+    addNumber(doc, "favorite_count", status.getFavoriteCount());
     doc.put("is_possibly_sensitive", status.isPossiblySensitive());
     doc.put("is_favorited", status.isFavorited());
     doc.put("is_truncated", status.isTruncated());
@@ -320,10 +320,10 @@ public class TwitterSource
       addString(doc, "expanded_url", mediaEntities[0].getExpandedURL());
     }
 
-    doc.put("user_id", user.getId());
-    doc.put("user_friends_count", user.getFriendsCount());
-    doc.put("user_statuses_count", user.getStatusesCount());
-    doc.put("user_followers_count", user.getFollowersCount());
+    addNumber(doc, "user_id", user.getId());
+    addNumber(doc, "user_friends_count", user.getFriendsCount());
+    addNumber(doc, "user_statuses_count", user.getStatusesCount());
+    addNumber(doc, "user_followers_count", user.getFollowersCount());
     doc.put("user_created_at", formatterTo.format(user.getCreatedAt()));
     addString(doc, "user_location", user.getLocation());
     addString(doc, "user_description", user.getDescription());
@@ -368,6 +368,24 @@ public class TwitterSource
 
   private Schema createOptional(Schema schema) {
     return Schema.createUnion(Arrays.asList(schema, Schema.create(Type.NULL)));
+  }
+
+  private static void addNumber(Record doc, String avroField, Object val) {
+    if (val instanceof Integer) {
+      if ((Integer)val == -1) {
+        doc.put(avroField, null);
+      } else {
+        doc.put(avroField, val);
+      }
+    } else if (val instanceof Long) {
+      if ((Long)val == -1) {
+        doc.put(avroField, null);
+      } else {
+        doc.put(avroField, val);
+      }
+    } else {
+      doc.put(avroField, val);
+    }
   }
 
   private void addString(Record doc, String avroField, String val) {
