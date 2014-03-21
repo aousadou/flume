@@ -198,9 +198,9 @@ public class TwitterSource
 
   public void onStatus(Status status)  {
     Record doc = extractRecord(avroSchema, status);
-    if (LOGGER.isTraceEnabled()) {
-      LOGGER.trace("Extracted record is : "  + doc.toString());
-    }
+    // if (LOGGER.isTraceEnabled()) {
+      LOGGER.debug("Extracted record is : "  + doc.toString());
+    // }
     if (doc == null) {
       return; // skip
     }
