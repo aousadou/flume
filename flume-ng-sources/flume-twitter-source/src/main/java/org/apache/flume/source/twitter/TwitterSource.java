@@ -216,7 +216,8 @@ public class TwitterSource
         return; //skip
       }
       Event event = EventBuilder.withBody(bytes);
-      getChannelProcessor().processEvent(event); // send event to the flume sink
+      getChannelProcessor().processEvent(event);
+      // send event to the flume sink
       docs.clear();
     }
     docCount++;

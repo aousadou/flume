@@ -23,7 +23,11 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Strings;
 import com.google.common.base.Throwables;
-import org.apache.flume.*;
+import org.apache.flume.Channel;
+import org.apache.flume.ChannelException;
+import org.apache.flume.ChannelFullException;
+import org.apache.flume.Context;
+import org.apache.flume.Event;
 import org.apache.flume.annotations.Disposable;
 import org.apache.flume.annotations.InterfaceAudience;
 import org.apache.flume.annotations.InterfaceStability;
@@ -334,13 +338,14 @@ public class FileChannel extends BasicChannelSemantics {
     return trans;
   }
 
-  protected int getDepth() {
+  public int getDepth() {
     Preconditions.checkState(open, "Channel closed"  + channelNameDescriptor);
     Preconditions.checkNotNull(log, "log");
     FlumeEventQueue queue = log.getFlumeEventQueue();
     Preconditions.checkNotNull(queue, "queue");
     return queue.getSize();
   }
+
   void close() {
     if(open) {
       open = false;
