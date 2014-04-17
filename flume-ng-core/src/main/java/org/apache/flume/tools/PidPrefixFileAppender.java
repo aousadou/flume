@@ -28,6 +28,6 @@ public class PidPrefixFileAppender extends FileAppender {
   @Override
   public void setFile(String file) {
     RuntimeMXBean rt = ManagementFactory.getRuntimeMXBean();
-    super.setFile(rt.getName() + "-" + file);
+    super.setFile(file + "-" + rt.getName());
   }
 }
