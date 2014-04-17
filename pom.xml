@@ -56,15 +56,16 @@ limitations under the License.
     <module>flume-ng-core</module>
     <module>flume-ng-configuration</module>
     <module>flume-ng-embedded-agent</module>
-    <module>flume-ng-sinks</module>
+   
+<module>flume-ng-legacy-sources</module>
+
+ <module>flume-ng-sinks</module>
     <module>flume-ng-sources</module>
     <module>flume-ng-node</module>
     <module>flume-ng-dist</module>
     <module>flume-ng-channels</module>
-    <module>flume-ng-legacy-sources</module>
     <module>flume-ng-clients</module>
     <module>flume-ng-sdk</module>
-    <module>flume-ng-tests</module>
     <module>flume-tools</module>
   </modules>
 
@@ -209,19 +210,6 @@ limitations under the License.
 
       <build>
         <plugins>
-
-          <plugin>
-            <artifactId>maven-javadoc-plugin</artifactId>
-            <executions>
-              <execution>
-                <id>javadoc-jar</id>
-                <phase>package</phase>
-                <goals>
-                  <goal>aggregate-jar</goal>
-                </goals>
-              </execution>
-            </executions>
-          </plugin>
 
           <plugin>
             <groupId>org.apache.maven.plugins</groupId>
@@ -494,15 +482,6 @@ limitations under the License.
 
   <build>
 
-    <plugins>
-
-      <plugin>
-        <groupId>org.apache.rat</groupId>
-        <artifactId>apache-rat-plugin</artifactId>
-      </plugin>
-
-    </plugins>
-
     <pluginManagement>
       <plugins>
 
@@ -574,22 +553,6 @@ limitations under the License.
 
         <plugin>
           <groupId>org.apache.maven.plugins</groupId>
-          <artifactId>maven-javadoc-plugin</artifactId>
-          <version>2.9</version>
-          <configuration>
-            <outputDirectory>${project.build.directory}/site/apidocs</outputDirectory>
-            <!-- switch on dependency-driven aggregation -->
-            <includeDependencySources>true</includeDependencySources>
-
-            <dependencySourceIncludes>
-              <!-- include ONLY flume multi-module dependencies -->
-              <dependencySourceInclude>org.apache.flume:*</dependencySourceInclude>
-            </dependencySourceIncludes>
-          </configuration>
-        </plugin>
-
-        <plugin>
-          <groupId>org.apache.maven.plugins</groupId>
           <artifactId>maven-assembly-plugin</artifactId>
           <version>2.3</version>
         </plugin>
@@ -604,15 +567,6 @@ limitations under the License.
           <groupId>com.thoughtworks.paranamer</groupId>
           <artifactId>paranamer-maven-plugin</artifactId>
           <version>2.3</version>
-        </plugin>
-
-        <plugin>
-          <groupId>org.apache.maven.plugins</groupId>
-          <artifactId>maven-site-plugin</artifactId>
-          <version>3.3</version>
-          <configuration>
-            <siteDirectory>${project.basedir}/flume-ng-doc</siteDirectory>
-          </configuration>
         </plugin>
 
         <plugin>
@@ -1136,16 +1090,6 @@ limitations under the License.
             </reports>
           </reportSet>
         </reportSets>
-      </plugin>
-
-      <plugin>
-        <groupId>org.tomdz.maven</groupId>
-        <artifactId>sphinx-maven-plugin</artifactId>
-        <version>1.0.2</version>
-        <inherited>false</inherited>
-        <configuration>
-          <sourceDirectory>${project.basedir}/flume-ng-doc/sphinx</sourceDirectory>
-        </configuration>
       </plugin>
 
     </plugins>
