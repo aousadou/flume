@@ -197,10 +197,11 @@ public class TwitterSource
   }
 
   public void onStatus(Status status)  {
+    long start = System.currentTimeMillis();
     Record doc = extractRecord(avroSchema, status);
-    // if (LOGGER.isTraceEnabled()) {
-      LOGGER.debug("Extracted record is : "  + doc.toString());
-    // }
+    if (LOGGER.isTraceEnabled()) {
+      LOGGER.trace("Extracted record is : " + doc.toString());
+    }
     if (doc == null) {
       return; // skip
     }
@@ -228,6 +229,9 @@ public class TwitterSource
     if ((docCount % STATS_INTERVAL) == 0) {
       logStats();
     }
+
+    LOGGER.debug("Time to read tweet id=" + status.getId() + " " +
+        (System.currentTimeMillis() - start) + " ms");
   }
 
   private Schema createAvroSchema() {
@@ -457,6 +461,11 @@ public class TwitterSource
 
   @Override
   public void onFollow(User source, User followedUser) {
+
+  }
+
+  @Override
+  public void onUnfollow(User user, User user2) {
 
   }
 
