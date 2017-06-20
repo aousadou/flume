@@ -274,7 +274,7 @@ public class TwitterSource
     fields.add(new Field("user_description", createOptional(Schema.create(Type.STRING)), null, null));
     fields.add(new Field("user_screen_name", createOptional(Schema.create(Type.STRING)), null, null));
     fields.add(new Field("user_name", createOptional(Schema.create(Type.STRING)), null, null));
-    fields.add(new Field("user_screen_name", createOptional(Schema.create(Type.STRING)), null, null));
+    // fields.add(new Field("user_screen_name", createOptional(Schema.create(Type.STRING)), null, null));
     fields.add(new Field("user_timezone", createOptional(Schema.create(Type.STRING)), null, null));
 
     fields.add(new Field("place_id", createOptional(Schema.create(Type.STRING)), null, null));
