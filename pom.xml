@@ -477,15 +477,10 @@ limitations under the License.
 
   <distributionManagement>
     <repository>
-      <id>apache.staging.https</id>
-      <name>Apache Staging Repository</name>
-      <url>https://repository.apache.org/service/local/staging/deploy/maven2/</url>
+      <id>scaledrisk-releases</id>
+      <name>ScaledRisk Releases</name>
+      <url>https://srfactory.scaledrisk.com/nexus/content/repositories/scaledrisk-third-parties/</url>
     </repository>
-    <site>
-      <id>apache.website</id>
-      <url>${siteUrlDeployment}</url>
-      <name>Flume Site</name>
-    </site>
   </distributionManagement>
 
   <build>
